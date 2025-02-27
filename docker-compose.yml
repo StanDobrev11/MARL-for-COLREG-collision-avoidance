@@ -1,0 +1,15 @@
+services:
+  pytorch:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8888:8888"  # Jupyter Notebook/Lab
+      - "6006:6006"  # TensorBoard
+    volumes:
+      - .:/app
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    environment:
+      - DISPLAY=$DISPLAY
+      - QT_X11_NO_MITSHM=1  # Fix shared memory issues
+    runtime: nvidia

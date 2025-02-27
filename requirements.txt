@@ -1,0 +1,8 @@
+jupyterlab
+ipywidgets
+jupyterlab-widgets
+gymnasium
+stable-baselines3
+tensorboard
+pygame
+optuna
