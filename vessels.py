@@ -33,7 +33,7 @@ class BaseShip:
             clip_lon: Optional[tuple[float, float]] = None,
     ) -> Tuple[float, float]:
         lat, lon = plane_sailing_next_position(
-            [self.lat, self.lon],
+            (self.lat, self.lon),
             self.course,
             self.speed,
             time_interval,
@@ -78,7 +78,7 @@ class Target(BaseShip):
         self.tbc: float = 0.0  # time to BCR
         self.stand_on: bool = True  # defines if the target gives way or is a stand-on vessel
         self.is_dangerous: bool = False  # defines the status of the target
-        self.aspect: Optional[str] = None # the aspect of the target as viewed from own ship
+        self.aspect: Optional[str] = None  # the aspect of the target as viewed from own ship
 
     def __repr__(self):
         return (f'{self.__class__.__name__}:\n'
@@ -97,7 +97,6 @@ class Target(BaseShip):
                 f'Aspect: {self.aspect}\n')
 
 
-
 class OwnShip(BaseShip):
 
     def __init__(self, *args, **kwargs) -> None:
@@ -111,8 +110,8 @@ class OwnShip(BaseShip):
 
     def calculate_distance(self, target: Union['Target', 'StaticObject', 'Tuple']) -> float:
         return rumbline_distance(
-            [self.lat, self.lon],
-            [target[0], target[1]] if isinstance(target, tuple) else [target.lat, target.lon])
+            (self.lat, self.lon),
+            (target[0], target[1]) if isinstance(target, tuple) else (target.lat, target.lon))
 
     def calculate_relative_course(self, target: 'Target') -> float:
         """
