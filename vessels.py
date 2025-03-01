@@ -10,6 +10,23 @@ class StaticObject:
         self.lat = lat
         self.lon = lon
 
+    def __repr__(self):
+        return f'{self.lat}, {self.lon}'
+
+    def wp_distance(self, agent: 'OwnShip') -> float:
+        return agent.calculate_distance(self)
+
+    def wp_eta(self, agent: 'OwnShip') -> float:
+        # will be recalculated when calling reset()
+        return 60 * self.wp_distance(agent) / agent.speed
+
+    def wp_relative_bearing(self, agent: 'OwnShip') -> float:
+        return agent.calculate_relative_bearing(self)
+
+    def wp_target_eta(self, agent=None) -> float:
+        # will ALWAYS be calculated when handling the state
+        return 0.0
+
 
 class BaseShip:
     def __init__(

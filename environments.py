@@ -177,20 +177,6 @@ class MarineEnv(gym.Env):
             ])
         })
 
-    def wp_distance(self, agent: 'OwnShip') -> float:
-        return agent.calculate_distance(self.waypoint)
-
-    def wp_eta(self, agent: 'OwnShip') -> float:
-        # will be recalculated when calling reset()
-        return 60 * self.wp_distance(agent) / agent.speed
-
-    def wp_relative_bearing(self, agent: 'OwnShip') -> float:
-        return agent.calculate_relative_bearing(self.waypoint)
-
-    def wp_target_eta(self, agent=None) -> float:
-        # will ALWAYS be calculated when handling the state
-        return 0.0
-
     def _agent_step(self, observation, agent, action, waypoint: StaticObject = None):
         """ for each agent update parameters """
         # extract own ship params from the current state
@@ -306,10 +292,14 @@ class MarineEnv(gym.Env):
 
         return self.observation, reward, terminated, truncated, info
 
-    def calculate_reward(self, previous_obs: ObsType, current_obs: ObsType, agent: Optional[OwnShip]=None) -> tuple[float, bool, bool, dict[str, int]]:
+    def calculate_reward(self, previous_obs: ObsType, current_obs: ObsType, agent: Optional[OwnShip] = None,
+                         waypoint: StaticObject = None) -> tuple[
+        float, bool, bool, dict[str, int]]:
         """ method to calculate the reward """
 
         agent = agent if agent is not None else self.own_ship
+
+        waypoint = waypoint if waypoint is not None else self.waypoint
 
         def wp_following_reward(rwrd: float):
 
@@ -383,7 +373,7 @@ class MarineEnv(gym.Env):
         speed_change = current_speed - previous_speed  # negative means slowing down
 
         # reaching the wp -> large reward and episode termination
-        if self.wp_distance(agent) < self.WP_REACH_THRESHOLD:
+        if waypoint.wp_distance(agent) < self.WP_REACH_THRESHOLD:
             info['terminated'] = 'WP Reached!'
             return self.WP_REACH_REWARD, True, False, info
 
@@ -558,9 +548,9 @@ class MarineEnv(gym.Env):
             self.waypoint.lat, self.waypoint.lon = self._place_waypoint(3, self.ENV_RANGE - 1)
 
             # calculate target eta, calculated using initial speed
-            target_eta = self.wp_eta(self.own_ship)
+            target_eta = self.waypoint.wp_eta(self.own_ship)
 
-            own_ship_data = self._generate_own_ship_data(self.own_ship)
+            own_ship_data = self._generate_own_ship_data(self.own_ship, self.waypoint)
             own_ship_data['wp_eta'] = target_eta
             own_ship_data['wp_target_eta'] = target_eta
 
@@ -587,8 +577,8 @@ class MarineEnv(gym.Env):
             # place the waypoint
             self.waypoint.lat, self.waypoint.lon = self._place_waypoint(12, 17)
 
-            target_eta = self.wp_eta(self.own_ship)
-            own_ship_data = self._generate_own_ship_data(self.own_ship)
+            target_eta = self.waypoint.wp_eta(self.own_ship)
+            own_ship_data = self._generate_own_ship_data(self.own_ship, self.waypoint)
             # course to match wp + minor deviation
             self.own_ship.course = self.own_ship.calculate_true_bearing(self.waypoint) + random.uniform(-5, 5)
             own_ship_data['course'] = self.own_ship.course
@@ -979,10 +969,8 @@ class MarineEnv(gym.Env):
         for key in self.OWN_SHIP_PARAMS:
             result[key] = getattr(agent, key)
         for key in self.WP_PARAMS:
-            # if waypoint is not None:
-            result[key] = getattr(waypoint, key)
-            # else:
-            #     result[key] = getattr(self, key)(agent)
+           result[key] = getattr(waypoint, key)(agent)
+
         return result
 
     def _generate_zero_target_data(self, targets_count: int) -> list[dict[str, float]]:
