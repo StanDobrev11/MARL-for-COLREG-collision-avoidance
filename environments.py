@@ -105,7 +105,7 @@ class MarineEnv(gym.Env):
 
         # initialize the state
         self.observation = None
-
+        self.observations: list = []  # will hold multiple observations for marl
 
         # initialize own ship
         self.own_ship = OwnShip()
@@ -114,6 +114,7 @@ class MarineEnv(gym.Env):
 
         # list containing all targets in the env
         self.agents: list = []
+        self.targets: list = []
 
         # initialize the wp
         self.waypoint = StaticObject()  # 2 elements, latitude and longitude
@@ -176,31 +177,32 @@ class MarineEnv(gym.Env):
             ])
         })
 
-    @property
-    def wp_distance(self) -> float:
-        return self.own_ship.calculate_distance(self.waypoint)
+    def wp_distance(self, agent: 'OwnShip') -> float:
+        return agent.calculate_distance(self.waypoint)
 
-    @property
-    def wp_eta(self) -> float:
+    def wp_eta(self, agent: 'OwnShip') -> float:
         # will be recalculated when calling reset()
-        return 60 * self.wp_distance / self.own_ship.speed
+        return 60 * self.wp_distance(agent) / agent.speed
 
-    @property
-    def wp_relative_bearing(self) -> float:
-        return self.own_ship.calculate_relative_bearing(self.waypoint)
+    def wp_relative_bearing(self, agent: 'OwnShip') -> float:
+        return agent.calculate_relative_bearing(self.waypoint)
 
-    @property
-    def wp_target_eta(self) -> float:
+    def wp_target_eta(self, agent=None) -> float:
         # will ALWAYS be calculated when handling the state
         return 0.0
 
-    def step(self, action) -> tuple[ObsType, float, bool, bool, dict[str, int]]:
-
-        # increment the step counter
-        self.step_counter += 1
-
+    def _agent_step(self, observation, agent, action, waypoint: StaticObject = None):
+        """ for each agent update parameters """
         # extract own ship params from the current state
-        course, speed, last_wp_distance, last_wp_eta, last_wp_relative_bearing, last_tgt_eta = self.observation[:6]
+        course, speed, last_wp_distance, last_wp_eta, last_wp_relative_bearing, last_tgt_eta = observation[:6]
+
+        if waypoint is None:
+            waypoint = self.waypoint
+        else:
+            waypoint.wp_distance = last_wp_distance
+            waypoint.wp_eta = last_wp_eta
+            waypoint.wp_relative_bearing = last_wp_relative_bearing
+            waypoint.wp_target_eta = last_tgt_eta
 
         # update the params based on action
         if isinstance(self.action_space, spaces.Discrete):
@@ -210,20 +212,73 @@ class MarineEnv(gym.Env):
             speed_change = action[1] * self.MAX_SPEED_CHANGE
 
         # update and apply own ship parameters
-        self.own_ship.course = (course + course_change) % 360
-        self.own_ship.speed += speed_change
-        if self.own_ship.speed > 0:
-            self.own_ship.speed = min(self.own_ship.max_speed, self.own_ship.speed)
+        agent.course = (course + course_change) % 360
+        agent.speed += speed_change
+        if agent.speed > 0:
+            agent.speed = min(agent.max_speed, agent.speed)
         else:
-            self.own_ship.speed = max(self.own_ship.min_speed, self.own_ship.speed)
+            agent.speed = max(agent.min_speed, agent.speed)
 
         # update next position
-        self.own_ship.update_position(time_interval=self.timescale, clip_lat=self.lat_bounds, clip_lon=self.lon_bounds)
+        agent.update_position(time_interval=self.timescale, clip_lat=self.lat_bounds, clip_lon=self.lon_bounds)
 
         # generate own state data
-        own_ship_data = self._generate_own_ship_data()
+        own_ship_data = self._generate_own_ship_data(agent, waypoint)
         own_ship_data['wp_target_eta'] = last_tgt_eta - self.timescale
 
+        return own_ship_data
+
+    def step(self, action) -> tuple[ObsType, float, bool, bool, dict[str, int]]:
+
+        agent = self.own_ship
+        # increment the step counter
+        self.step_counter += 1
+
+        if self.observations:
+            # generating agents movement
+            temp_agents_list = []
+            self.targets.clear()
+            for observation, waypoint, agent, act in zip(self.observations, self.waypoints, self.agents, action):
+                agent_data = self._agent_step(observation, waypoint, agent, act)
+
+                # check agent coordinates and remove from list if out of bounds
+                if agent.lat <= self.lat_bounds[0] or agent.lat >= self.lon_bounds[1] or \
+                        agent.lon <= self.lon_bounds[0] or agent.lon >= self.lon_bounds[1]:
+                    self.observations.remove(observation)
+                    self.agents.remove(agent)
+                    self.waypoints.remove(waypoint)
+
+                self.targets.append(Target(position=(agent.lat, agent.lon)))
+                temp_agents_list.append(agent_data)
+
+                # add each agent as target relative to the other agents
+            for i, agent in enumerate(self.agents):
+                for target in self.targets:
+                    if target.lon == agent.lon and target.lat == agent.lat:
+                        continue
+
+                    agent.update_target(target)
+
+                dangerous_targets_data = self._generate_dangerous_targets_state(agent)
+                # construct the final observation
+                raw_observation = {
+                    "own_ship": temp_agents_list[i],
+                    "targets": dangerous_targets_data
+                }
+
+                current_obs = self._flatten_observation(raw_observation)
+
+                if i == 0:  # own ship so calculate reward
+                    previous_obs = self.observations[i]
+                    current_obs = self._flatten_observation(raw_observation)
+
+                    reward, terminated, truncated, info = self.calculate_reward(previous_obs, current_obs, agent)
+
+                self.observations[i] = current_obs
+
+            return self.observations, reward, terminated, truncated, info
+
+        own_ship_data = self._agent_step(self.observation, agent, action)
         # move/update all detected targets
         for target in self.own_ship.detected_targets:
             target.update_position(time_interval=self.timescale)
@@ -234,7 +289,7 @@ class MarineEnv(gym.Env):
                     target.lon <= self.lon_bounds[0] or target.lon >= self.lon_bounds[1]:
                 self.own_ship.detected_targets.remove(target)
 
-        dangerous_targets_data = self._generate_dangerous_targets_state()
+        dangerous_targets_data = self._generate_dangerous_targets_state(self.own_ship)
         # construct the final observation
         raw_observation = {
             "own_ship": own_ship_data,
@@ -251,8 +306,10 @@ class MarineEnv(gym.Env):
 
         return self.observation, reward, terminated, truncated, info
 
-    def calculate_reward(self, previous_obs: ObsType, current_obs: ObsType) -> tuple[float, bool, bool, dict[str, int]]:
+    def calculate_reward(self, previous_obs: ObsType, current_obs: ObsType, agent: Optional[OwnShip]=None) -> tuple[float, bool, bool, dict[str, int]]:
         """ method to calculate the reward """
+
+        agent = agent if agent is not None else self.own_ship
 
         def wp_following_reward(rwrd: float):
 
@@ -326,7 +383,7 @@ class MarineEnv(gym.Env):
         speed_change = current_speed - previous_speed  # negative means slowing down
 
         # reaching the wp -> large reward and episode termination
-        if self.wp_distance < self.WP_REACH_THRESHOLD:
+        if self.wp_distance(agent) < self.WP_REACH_THRESHOLD:
             info['terminated'] = 'WP Reached!'
             return self.WP_REACH_REWARD, True, False, info
 
@@ -338,11 +395,11 @@ class MarineEnv(gym.Env):
         if self.training_stage == 2:
 
             # should check if dangerous targets in the list
-            if not any(target.is_dangerous for target in self.own_ship.dangerous_targets):
+            if not any(target.is_dangerous for target in agent.dangerous_targets):
                 reward = wp_following_reward(reward)
 
             else:
-                for _, target in enumerate(self.own_ship.dangerous_targets):
+                for _, target in enumerate(agent.dangerous_targets):
                     if not target.is_dangerous:
                         continue
                     # huge penalty for collision (immediate termination)
@@ -435,8 +492,8 @@ class MarineEnv(gym.Env):
             return reward, terminated, truncated, info
 
         # check if going out of bounds
-        out_of_screen = self.own_ship.lat <= self.lat_bounds[0] or self.own_ship.lat >= self.lat_bounds[1] or \
-                        self.own_ship.lon <= self.lon_bounds[0] or self.own_ship.lon >= self.lon_bounds[1]
+        out_of_screen = agent.lat <= self.lat_bounds[0] or agent.lat >= self.lat_bounds[1] or \
+                        agent.lon <= self.lon_bounds[0] or agent.lon >= self.lon_bounds[1]
 
         if out_of_screen:
             reward -= 100.0  # Large penalty for leaving bounds
@@ -470,6 +527,7 @@ class MarineEnv(gym.Env):
         self.step_counter = 0
         self.own_ship_trace.clear()
         self.target_traces.clear()
+        self.waypoints.clear()
 
         # initialize the data dicts for the observation space representation
         own_ship_data = {}
@@ -500,9 +558,9 @@ class MarineEnv(gym.Env):
             self.waypoint.lat, self.waypoint.lon = self._place_waypoint(3, self.ENV_RANGE - 1)
 
             # calculate target eta, calculated using initial speed
-            target_eta = self.wp_eta
+            target_eta = self.wp_eta(self.own_ship)
 
-            own_ship_data = self._generate_own_ship_data()
+            own_ship_data = self._generate_own_ship_data(self.own_ship)
             own_ship_data['wp_eta'] = target_eta
             own_ship_data['wp_target_eta'] = target_eta
 
@@ -529,8 +587,8 @@ class MarineEnv(gym.Env):
             # place the waypoint
             self.waypoint.lat, self.waypoint.lon = self._place_waypoint(12, 17)
 
-            target_eta = self.wp_eta
-            own_ship_data = self._generate_own_ship_data()
+            target_eta = self.wp_eta(self.own_ship)
+            own_ship_data = self._generate_own_ship_data(self.own_ship)
             # course to match wp + minor deviation
             self.own_ship.course = self.own_ship.calculate_true_bearing(self.waypoint) + random.uniform(-5, 5)
             own_ship_data['course'] = self.own_ship.course
@@ -544,6 +602,8 @@ class MarineEnv(gym.Env):
 
                 # add target to detected targets
                 self.own_ship.detected_targets.append(target)
+                # add target to targets list
+                self.targets.append(target)
 
             # generate the targets data
             dangerous_targets_data = self._generate_dangerous_targets_state(self.own_ship)
@@ -559,25 +619,88 @@ class MarineEnv(gym.Env):
         if not self.marl:
             return self.observation, {}
 
+        # add own ship to agents list
+        self.agents.append(self.own_ship)
+
+        # add own wp to wp list
+        self.waypoints.append(self.waypoint)
+
+        # add initial observation to observation list
+        self.observations.append(self.observation)
+
+        # convert own ship to target and add own ship to targets list
+        self.targets.append(
+            Target(
+                position=(self.own_ship.lat, self.own_ship.lon),
+                course=self.own_ship.course,
+                speed=self.own_ship.speed,
+            )
+        )
         # TODO for each target generate observation space
         for target in self.own_ship.detected_targets:
             # define wp along the course of the target bss the aspect
             # the wp distance is +1nm further away from the initial distance
             # bearing to wp is same as course
             # convert the target to OwnShipClass
-            target_own = OwnShip(
+
+            agent = OwnShip(
                 position=(target.lat, target.lon),
                 course=target.course,
                 speed=target.speed,
             )
+            # add modified target to agents list
+            self.agents.append(agent)
+
             wp_distance = target.distance + 1
-            wp_relative_bearing = 0
             wp_true_bearing = target.course
-            pass
+            wp_relative_bearing = 0
+            wp_eta = 60 * wp_distance / target.speed
+            wp_target_eta = wp_eta
+
+            waypoint = StaticObject()
+            waypoint.lat, waypoint.lon = plane_sailing_position(
+                (target.lat, target.lon),
+                wp_true_bearing,
+                wp_relative_bearing,
+            )
+
+            self.waypoints.append(waypoint)
+
+            target_own_data = dict(
+                course=target.course,
+                speed=target.speed,
+                wp_distance=wp_distance,
+                wp_eta=wp_eta,
+                wp_relative_bearing=wp_relative_bearing,
+                wp_target_eta=wp_target_eta,
+            )
+
+            # Reset detected targets list for each target
+            agent.detected_targets.clear()
+
+            for tgt in self.targets:
+                if target == tgt:
+                    continue
+
+                # update targets relative to other targets
+                agent.update_target(tgt)
+                # add calculations to detected targets list
+                agent.detected_targets.append(tgt)
+
+            dangerous_targets_data = self._generate_dangerous_targets_state(agent)
+
+            raw_observation = {
+                "own_ship": target_own_data,
+                "targets": dangerous_targets_data
+            }
+
+            observation = self._flatten_observation(raw_observation)
+            self.observations.append(observation)
+
+        return self.observations, {}
 
     def _convert_own_ship_to_target(self):
         pass
-
 
     def render(self):
         if self.window is None:
@@ -851,13 +974,15 @@ class MarineEnv(gym.Env):
         py = int((self.lat_bounds[1] - lat) / lat_range * self.window_size)
         return px, py
 
-    def _generate_own_ship_data(self) -> dict[str, float]:
+    def _generate_own_ship_data(self, agent: OwnShip, waypoint: StaticObject) -> dict[str, float]:
         result = dict()
         for key in self.OWN_SHIP_PARAMS:
-            result[key] = getattr(self.own_ship, key)
+            result[key] = getattr(agent, key)
         for key in self.WP_PARAMS:
-            result[key] = getattr(self, key)
-
+            # if waypoint is not None:
+            result[key] = getattr(waypoint, key)
+            # else:
+            #     result[key] = getattr(self, key)(agent)
         return result
 
     def _generate_zero_target_data(self, targets_count: int) -> list[dict[str, float]]:
@@ -906,7 +1031,7 @@ if __name__ == '__main__':
         training=False,
         seed=42,
         total_targets=3,
-        marl=True,
+        marl=False,
     )
     env = MarineEnv(**env_kwargs)
     agent = PPO('MlpPolicy', env=env).load("project_logs/optuna/best_model/best_model.zip", device='cpu')
@@ -917,15 +1042,19 @@ if __name__ == '__main__':
         # env.cpa_limit = 2
         total_reward = 0
         for _ in range(int(400 / env.timescale)):
-            action = agent.predict(state, deterministic=True)
-            # action = [[1, 1], 0]
-            next_state, reward, terminated, truncated, info = env.step(action[0])
+            if env_kwargs['marl']:
+
+                actions = [agent.predict(i, deterministic=True)[0] for i in state]
+                next_state, reward, terminated, truncated, info = env.step(actions)
+            else:
+                action = agent.predict(state, deterministic=True)
+                next_state, reward, terminated, truncated, info = env.step(action[0])
             total_reward += reward
 
             print(next_state)
-            print(env.own_ship.dangerous_targets)
-            print(reward)
-            print(total_reward)
+            # print(env.own_ship.dangerous_targets)
+            # print(reward)
+            # print(total_reward)
 
             if terminated or truncated:
                 print(info)

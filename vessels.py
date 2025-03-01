@@ -57,6 +57,10 @@ class BaseShip:
     def __repr__(self):
         return f'{self.__class__.__name__}:\nPosition: {self.lat, self.lon}\nCourse: {self.course}\nSpeed: {self.speed}'
 
+    @property
+    def ship_type(self):
+        return self.__class__.__name__
+
 
 class Target(BaseShip):
     """

@@ -4,9 +4,9 @@ import numpy as np
 
 
 def plane_sailing_position(
-    start_point: Tuple[float, float],
-    bearing: float,
-    distance: float
+        start_point: Tuple[float, float],
+        bearing: float,
+        distance: float
 ) -> np.ndarray:
     """
     Computes the new geographic position after traveling a given distance along a constant bearing
@@ -73,10 +73,10 @@ def plane_sailing_position(
 
 
 def plane_sailing_next_position(
-    start_point: Tuple[float, float],
-    course: float,
-    speed: float,
-    time_interval: float = 6
+        start_point: Tuple[float, float],
+        course: float,
+        speed: float,
+        time_interval: float = 6
 ) -> np.ndarray:
     """
     Computes the next position of a vessel using the plane sailing method.
@@ -110,7 +110,6 @@ def plane_sailing_next_position(
     >>> plane_sailing_next_position((34.0, -118.0), 90, 10, 6)
     array([34.0, -117.99])  # Approximate new position after 6 minutes
     """
-
 
     # Convert lat/lon and course to radians
     lat1, lon1 = np.radians(start_point)
@@ -326,7 +325,6 @@ def calculate_relative_bearing(heading: float, bearing: float) -> float:
     >>> calculate_relative_bearing(100, 30)
     -70  # Target is 70° to port
     """
-
 
     # Normalize heading and bearing to 0-360 degrees
     heading = heading % 360
