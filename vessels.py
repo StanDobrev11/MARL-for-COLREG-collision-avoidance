@@ -9,6 +9,10 @@ class StaticObject:
     def __init__(self, lat: float = 0.0, lon: float = 0.0) -> None:
         self.lat = lat
         self.lon = lon
+        self.__wp_distance = None
+        self.__wp_eta = None
+        self.__wp_relative_bearing = None
+        self.__wp_target_eta = None
 
     def __repr__(self):
         return f'{self.lat}, {self.lon}'
