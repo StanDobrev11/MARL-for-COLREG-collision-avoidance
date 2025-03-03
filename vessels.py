@@ -9,10 +9,6 @@ class StaticObject:
     def __init__(self, lat: float = 0.0, lon: float = 0.0) -> None:
         self.lat = lat
         self.lon = lon
-        self.__wp_distance = None
-        self.__wp_eta = None
-        self.__wp_relative_bearing = None
-        self.__wp_target_eta = None
 
     def __repr__(self):
         return f'{self.lat}, {self.lon}'
@@ -27,25 +23,42 @@ class StaticObject:
     def wp_relative_bearing(self, agent: 'OwnShip') -> float:
         return agent.calculate_relative_bearing(self)
 
-    def wp_target_eta(self, agent=None) -> float:
+    @staticmethod
+    def wp_target_eta() -> float:
         # will ALWAYS be calculated when handling the state
         return 0.0
 
 
 class BaseShip:
+    VESSEL_CATEGORY = {
+        'pwd': 1,  # power-driven vessel, lowest priority
+        'sv': 2,  # sailing vessel not propelled by machinery
+        'fv': 3,  # fishing vessel engaged in fishing
+        'ram': 4,  # vessel restricted in ability to manoeuvre
+        'nuc': 5,  # not under command, highes priority
+    }
+
     def __init__(
             self,
             position: Tuple[float, float] = (0.0, 0.0),
             course: float = 0.0,
             speed: float = 0.0,
+            name: str = None,  # name of the vessel for easy reference
+            kind: str = 'pwd',  # type of vessel for setting responsibilities, e.g. power-driven vessel, NUC, etc.
             min_speed: float = -7.0,
             max_speed: float = 19.0,
     ) -> None:
         self.lat, self.lon = position
         self.course = course
         self.speed = speed
+        self.name = name
+        self.kind = kind
         self.min_speed = min_speed
         self.max_speed = max_speed
+
+    @property
+    def category(self):
+        return self.VESSEL_CATEGORY[self.kind]
 
     def update_position(
             self,
@@ -78,10 +91,6 @@ class BaseShip:
     def __repr__(self):
         return f'{self.__class__.__name__}:\nPosition: {self.lat, self.lon}\nCourse: {self.course}\nSpeed: {self.speed}'
 
-    @property
-    def ship_type(self):
-        return self.__class__.__name__
-
 
 class Target(BaseShip):
     """
@@ -101,9 +110,77 @@ class Target(BaseShip):
         self.tcpa: float = 0.0  # time to CPA
         self.bcr: float = 0.0  # own ship bow crossing range of the target. If positive - crossing bow of target,
         self.tbc: float = 0.0  # time to BCR
-        self.stand_on: bool = True  # defines if the target gives way or is a stand-on vessel
         self.is_dangerous: bool = False  # defines the status of the target
-        self.aspect: Optional[str] = None  # the aspect of the target as viewed from own ship
+        self.__stand_on: [bool, None] = None  # defines if the target gives way or is a stand-on vessel
+        self.__aspect: Optional[str] = None  # the aspect of the target as viewed from own ship
+
+    @property
+    def aspect(self) -> str:
+        return self.__aspect
+
+    @aspect.setter
+    def aspect(self, agent: 'OwnShip') -> None:
+        if self.__aspect is None:
+            self.set_aspect(agent)
+
+    def set_aspect(self, agent: 'OwnShip') -> None:
+        """Setter to determine the aspect (head-on, crossing, overtaking) based on COLREGs."""
+
+        course_diff = self.course - agent.course  # Preserve sign
+
+        # Normalize the difference within [-180, 180] to indicate relative movement to starboard or port
+        if course_diff > 180:
+            course_diff -= 360
+        elif course_diff < -180:
+            course_diff += 360
+
+        reversed_relative_bearing = self.calculate_relative_bearing(agent)
+
+        # Head-on, Rule 14, each vessel sees the other ahead
+        if abs(self.relative_bearing) <= 5 and abs(reversed_relative_bearing) <= 5:
+            self.__aspect = 'head_on'
+
+        # this sets for crossing or overtaking
+        elif abs(self.relative_bearing) <= 112.5:
+            # Crossing, Rule 15, each vessel sees the other on the opposite side
+            if abs(reversed_relative_bearing) <= 112.5 and \
+                    np.sign(self.relative_bearing) != np.sign(reversed_relative_bearing):
+                self.__aspect = 'crossing'
+            # Overtaking, Rule 13, target sees the vessel abaft the beam
+            if agent.speed > self.speed and 112.5 < abs(reversed_relative_bearing) <= 180:
+                if np.sign(self.relative_bearing) != np.sign(course_diff):
+                    self.__aspect = 'overtaking'
+                else:
+                    self.__aspect = None
+
+    @property
+    def stand_on(self) -> bool:
+        return self.__stand_on
+
+    @stand_on.setter
+    def stand_on(self, agent: 'OwnShip') -> None:
+        if self.aspect == 'overtaking':
+            self.__stand_on = True
+        else:
+            self.set_stand_on(agent)
+
+    def set_stand_on(self, agent: 'OwnShip') -> None:
+        if self.category < agent.category:
+            self.__stand_on = False
+
+        elif self.category > agent.category:
+            self.__stand_on = True
+        # both vessels are same kind so the responsibility will be resolved using the aspect
+
+        if self.aspect == 'head_on':
+            self.__stand_on = False
+        elif self.aspect == 'crossing':
+            if self.relative_bearing > 0:
+                self.__stand_on = True
+            else:
+                self.__stand_on = False
+        elif self.aspect == 'overtaking':
+            self.__stand_on = True
 
     def __repr__(self):
         return (f'{self.__class__.__name__}:\n'
@@ -119,7 +196,9 @@ class Target(BaseShip):
                 f'BCR: {self.bcr:.2f}\n'
                 f'TBC: {self.tbc:.2f}\n'
                 f'IsDangerous: {self.is_dangerous}\n'
-                f'Aspect: {self.aspect}\n')
+                f'Aspect: {self.aspect}\n'
+                f'Category: {self.kind}\n'
+                f'Stand On: {self.stand_on}\n')
 
 
 class OwnShip(BaseShip):
@@ -170,7 +249,7 @@ class OwnShip(BaseShip):
 
         return relative_speed
 
-    def calculate_cpa_tcpa(self, target: 'Target'):
+    def calculate_cpa_tcpa(self, target: 'Target') -> Tuple[float, float]:
         """
         Calculate CPA and TCPA with edge case handling.
         """
@@ -187,7 +266,7 @@ class OwnShip(BaseShip):
 
         return cpa, max(tcpa * 60, 0)  # Ensure TCPA is non-negative
 
-    def calculate_bcr_tbc(self, target):
+    def calculate_bcr_tbc(self, target) -> Tuple[float, float]:
         """
         Calculate Bow Crossing Range (BCR) and Time to Bow Crossing (TBC) with edge case handling.
         """
@@ -258,6 +337,8 @@ class OwnShip(BaseShip):
         target.distance = self.calculate_distance((target.lat, target.lon))
         target.cpa, target.tcpa = self.calculate_cpa_tcpa(target)
         target.bcr, target.tbc = self.calculate_bcr_tbc(target)
+        target.set_aspect(self)
+        target.set_stand_on(self)
 
     def _relative_position_components(self, target: 'Target') -> Tuple[float, float]:
         own_lat_rad = np.radians(self.lat)
@@ -284,14 +365,7 @@ class OwnShip(BaseShip):
 
 
 if __name__ == '__main__':
-    target_ship = Target(position=(0.05, 0.05), course=270, speed=5, min_speed=5, max_speed=20)
-    own_ship = OwnShip(position=(0.0, 0.0), course=0, speed=10.0, min_speed=5, max_speed=20)
-    print(f'Distance: {own_ship.calculate_distance(target_ship)}')
-    print(f'Relative Speed: {own_ship.calculate_relative_speed(target_ship)}')
-    print(f'True bearing: {own_ship.calculate_true_bearing(target_ship)}')
-    print(
-        f'Relative target bearing to own ship: {target_ship.calculate_relative_bearing(own_ship)}')
-    print(f'Relative bearing: {own_ship.calculate_relative_bearing(target_ship)}')
-    print(f'Relative course: {own_ship.calculate_relative_course(target_ship)}')
-    print(f'CPA / TCPA :{own_ship.calculate_cpa_tcpa(target_ship)}')
-    print(f'BCR / TBC: {own_ship.calculate_bcr_tbc(target_ship)}')
+    target_ship = Target(position=(0.05, 0.05), course=330, speed=5)
+    own_ship = OwnShip(position=(0.10, 0.0), course=0, speed=10.0)
+    own_ship.update_target(target_ship)
+    print(target_ship)
