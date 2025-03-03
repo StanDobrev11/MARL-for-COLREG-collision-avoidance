@@ -17,6 +17,13 @@ from vessels import OwnShip, Target, StaticObject, BaseShip
 class MarineEnv(gym.Env):
     metadata = {'render_modes': ['human', 'rgb_array'], 'render_fps': 30}
 
+    ASPECT_CATEGORY = [
+        'head_on',  # Rule 14
+        'crossing',  # Rule 15
+        'overtaking',  # Rule 13
+        'adrift',  # underway but stopped and making no way
+    ]
+
     OWN_SHIP_PARAMS: List[str] = []
     WP_PARAMS: List[str] = []
     TARGET_PARAMS: List[str] = []
@@ -42,12 +49,6 @@ class MarineEnv(gym.Env):
     # limits at witch collision is considered
     CPA_LIMIT: float = 0.1
     TCPA_LIMIT: float = 1
-
-    ASPECT_CATEGORY = {
-        'head_on': 0,  # Rule 14
-        'crossing': 1,  # Rule 15
-        'overtaking': 2,  # Rule 13
-    }
 
     # Constants for rewards and penalties
     CPA_AVOIDANCE_THRESHOLD = 1.2  # CPA threshold for excessive avoidance
@@ -144,16 +145,18 @@ class MarineEnv(gym.Env):
             'own_ship': spaces.Dict({
                 'course': spaces.Box(low=0, high=360, shape=(), dtype=np.float32),
                 'speed': spaces.Box(low=-10, high=20, shape=(), dtype=np.float32),
+                'vessel_category': spaces.Discrete(len(BaseShip.VESSEL_CATEGORY)),  # vessel type index
                 'wp_distance': spaces.Box(low=0, high=50, shape=(), dtype=np.float32),
                 'wp_eta': spaces.Box(low=0, high=300, shape=(), dtype=np.float32),
                 'wp_relative_bearing': spaces.Box(low=-180, high=180, shape=(), dtype=np.float32),
                 'wp_target_eta': spaces.Box(low=0, high=300, shape=(), dtype=np.float32),
-                'vessel_category': spaces.Discrete(len(BaseShip.VESSEL_CATEGORY)),  # vessel type index
             }),
             'targets': spaces.Tuple([
                 spaces.Dict({
+                    'aspect': spaces.Discrete(len(self.ASPECT_CATEGORY)),  # head_on, crossing, overtaking
                     'bcr': spaces.Box(low=-50, high=50, shape=(), dtype=np.float32),
                     'cpa': spaces.Box(low=0, high=50, shape=(), dtype=np.float32),
+                    'stand_on': spaces.Discrete(2),  # 0 - give way, 1 - stand-on
                     'target_course': spaces.Box(low=0, high=360, shape=(), dtype=np.float32),
                     'target_distance': spaces.Box(low=0, high=50, shape=(), dtype=np.float32),
                     'target_relative_bearing': spaces.Box(low=-180, high=180, shape=(), dtype=np.float32),
@@ -162,8 +165,6 @@ class MarineEnv(gym.Env):
                     'target_speed': spaces.Box(low=-10, high=20, shape=(), dtype=np.float32),
                     'tbc': spaces.Box(low=-100, high=100, shape=(), dtype=np.float32),
                     'tcpa': spaces.Box(low=0, high=100, shape=(), dtype=np.float32),
-                    'aspect': spaces.Discrete(len(self.ASPECT_CATEGORY)),  # head_on, crossing, overtaking
-                    'stand_on': spaces.Discrete(2),  # 0 - give way, 1 - stand-on
                     'vessel_category': spaces.Discrete(len(BaseShip.VESSEL_CATEGORY)),  # vessel type index
                 }) for _ in range(3)  # 3 top dangerous targets
             ])
@@ -505,7 +506,7 @@ class MarineEnv(gym.Env):
             self.waypoint.lat, self.waypoint.lon = place_waypoint(12, 17)
 
             target_eta = self.waypoint.wp_eta(self.own_ship)
-            own_ship_data = self._generate_own_ship_data()
+            own_ship_data = self._generate_own_ship_data(self.own_ship, self.waypoint)
             # course to match wp + minor deviation
             self.own_ship.course = self.own_ship.calculate_true_bearing(self.waypoint) + random.uniform(-5, 5)
             own_ship_data['course'] = self.own_ship.course
@@ -674,7 +675,7 @@ class MarineEnv(gym.Env):
 
         return targets_data
 
-    def _place_dangerous_target_ship(self, aspect: Optional[str] = None) -> 'Target':
+    def _place_dangerous_target_ship(self, aspect: str = None) -> 'Target':
         """
         Place a TargetShip on a potentially dangerous track with specified CPA and TCPA.
 
@@ -707,20 +708,23 @@ class MarineEnv(gym.Env):
 
             return tgt_course, tgt_speed
 
-        if aspect is None:
-            aspect = random.choice(self.ASPECTS)
-
         # Own ship's parameters
         own_lat, own_lon = self.own_ship.lat, self.own_ship.lon
         own_course = self.own_ship.course
         own_speed = self.own_ship.speed
 
+        if aspect is None:
+            aspect = random.choice(self.ASPECT_CATEGORY)
         # Target ship
         # if the relative course == 180 + relative bearing, the target is on a collision course.
         # to generate relative course != to 180 + relative bearing bss CPA, we need distance or TCPA
         # to calculate TCPA we need relative speed
         if aspect in ['static', 'crossing']:
             initial_distance = np.random.uniform(7, 9)
+        elif aspect in ['overtaking']:
+            initial_distance = np.random.uniform(2, 3)
+        elif aspect in ['adrift']:
+            initial_distance = np.random.uniform(2, 10)
         else:
             initial_distance = np.random.uniform(12, 19)
 
@@ -732,20 +736,17 @@ class MarineEnv(gym.Env):
         if aspect == 'head-on':
             relative_bearing = np.random.uniform(-5, 5)  # Relative bearing in degrees
             relative_speed = np.random.uniform(5, 15) + own_speed
-        elif aspect == 'static':
-            relative_bearing = np.random.uniform(-5, 5)
+        elif aspect == 'adrift':
+            relative_bearing = np.random.uniform(-10, 10)
             relative_speed = own_speed + np.random.sample()
         # own ship is give way vessel
         elif aspect == 'crossing':
-            relative_bearing = np.random.uniform(5, 117.5)
+            relative_bearing = np.random.uniform(5, 112.5)
+            relative_bearing *= -1 if np.random.uniform() < 0.3 else 1  # 70 to 30 for crossing/stand on target
             relative_speed = np.random.uniform(2, 15 + own_speed)
-        # elif scene == 'crossing':  # own ship stands on
-        #     relative_bearing = np.random.uniform(-5, -117.5)
-        #     relative_speed = np.random.uniform(2, 15 + own_speed)
         elif aspect == 'overtaking':
             relative_bearing = np.random.uniform(-45, 45)
-            relative_speed = np.random.uniform(2, own_speed * 0.9)
-            initial_distance = np.random.uniform(2, 4)
+            relative_speed = np.random.uniform(2, own_speed * 0.5)
 
         # deviation angle for randomness
         deviation_angle = np.degrees(np.arctan2(cpa, initial_distance))
@@ -761,7 +762,7 @@ class MarineEnv(gym.Env):
         )
         # Calculate the initial position of the TargetShip
         target_lat, target_lon = plane_sailing_position(
-            [own_lat, own_lon], true_target_bearing, initial_distance
+            (own_lat, own_lon), true_target_bearing, initial_distance
         )
 
         #  create target and add it to the environment
@@ -770,7 +771,6 @@ class MarineEnv(gym.Env):
             course=target_course,
             speed=target_speed,
         )
-        target.aspect = aspect
         self.own_ship.update_target(target)
 
         return target
@@ -805,12 +805,12 @@ class MarineEnv(gym.Env):
         py = int((self.lat_bounds[1] - lat) / lat_range * self.window_size)
         return px, py
 
-    def _generate_own_ship_data(self) -> dict[str, float]:
+    def _generate_own_ship_data(self, agent: OwnShip, waypoint: StaticObject) -> dict[str, float]:
         result = dict()
         for key in self.OWN_SHIP_PARAMS:
-            result[key] = getattr(self.own_ship, key)
+            result[key] = getattr(agent, key)
         for key in self.WP_PARAMS:
-            result[key] = getattr(self, key)
+            result[key] = getattr(waypoint, key)
 
         return result
 
@@ -853,7 +853,7 @@ if __name__ == '__main__':
     from stable_baselines3 import PPO
 
     env_kwargs = dict(
-        render_mode='human',
+        render_mode='rgb_array',
         continuous=True,
         training_stage=2,
         timescale=1 / 6,
@@ -862,7 +862,7 @@ if __name__ == '__main__':
         total_targets=3,
     )
     env = MarineEnv(**env_kwargs)
-    agent = PPO('MlpPolicy', env=env).load("ppo.zip", device='cpu')
+    # agent = PPO('MlpPolicy', env=env).load("ppo.zip", device='cpu')
     for i in range(5):
         state, _ = env.reset()
         print(env.training_stage)
@@ -870,11 +870,12 @@ if __name__ == '__main__':
         # env.cpa_limit = 2
         total_reward = 0
         for _ in range(int(400 / env.timescale)):
-            action = agent.predict(state, deterministic=True)
-            # action = [[1, 1], 0]
+            # action = agent.predict(state, deterministic=True)
+            action = [[1, 1], 0]
             next_state, reward, terminated, truncated, info = env.step(action[0])
             total_reward += reward
 
+            env.render()
             print(next_state)
             print(env.own_ship.dangerous_targets)
             print(reward)

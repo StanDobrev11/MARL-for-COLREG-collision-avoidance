@@ -30,6 +30,9 @@ class StaticObject:
 
 
 class BaseShip:
+
+    COUNT = 1
+
     VESSEL_CATEGORY = {
         'pwd': 0,  # power-driven vessel, lowest priority
         'sv': 1,  # sailing vessel not propelled by machinery
@@ -51,10 +54,25 @@ class BaseShip:
         self.lat, self.lon = position
         self.course = course
         self.speed = speed
-        self.name = name
+        self.__name = name
         self.kind = kind
         self.min_speed = min_speed
         self.max_speed = max_speed
+
+        # Assign a name if not provided
+        if name is None:
+            self.__name = f'{self.class_name}_{self.COUNT}'
+            self.COUNT += 1  # Increment counter correctly
+        else:
+            self.__name = name
+
+    @property
+    def name(self):
+        return self.__name
+
+    @property
+    def class_name(self):
+        return self.__class__.__name__
 
     @property
     def category(self):
@@ -184,6 +202,7 @@ class Target(BaseShip):
 
     def __repr__(self):
         return (f'{self.__class__.__name__}:\n'
+                f'Name: {self.__name}\n'
                 f'Position: {self.lat, self.lon}\n'
                 f'Course: {self.course:.2f}\n'
                 f'Speed: {self.speed:.2f}\n'
