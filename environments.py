@@ -11,7 +11,7 @@ from gymnasium.spaces.utils import flatten_space
 import numpy as np
 
 from utils import plane_sailing_position
-from vessels import OwnShip, Target, StaticObject
+from vessels import OwnShip, Target, StaticObject, BaseShip
 
 
 class MarineEnv(gym.Env):
@@ -44,11 +44,10 @@ class MarineEnv(gym.Env):
     TCPA_LIMIT: float = 1
 
     ASPECT_CATEGORY = {
-        'head_on': 1,  # Rule 14
-        'crossing': 2,  # Rule 15
-        'overtaking': 3,  # Rule 13
+        'head_on': 0,  # Rule 14
+        'crossing': 1,  # Rule 15
+        'overtaking': 2,  # Rule 13
     }
-
 
     # Constants for rewards and penalties
     CPA_AVOIDANCE_THRESHOLD = 1.2  # CPA threshold for excessive avoidance
@@ -63,7 +62,7 @@ class MarineEnv(gym.Env):
             self,
             # environment properties
             render_mode=None,
-            continuous: bool = False,
+            continuous: bool = True,
             timescale: int = 1,  # defines the step size, defaults to 1 min step
             training_stage: int = 1,  # defines different training stages, 0 for no training
             total_targets: int = 1,  # minimum targets should be one
@@ -149,6 +148,7 @@ class MarineEnv(gym.Env):
                 'wp_eta': spaces.Box(low=0, high=300, shape=(), dtype=np.float32),
                 'wp_relative_bearing': spaces.Box(low=-180, high=180, shape=(), dtype=np.float32),
                 'wp_target_eta': spaces.Box(low=0, high=300, shape=(), dtype=np.float32),
+                'vessel_category': spaces.Discrete(len(BaseShip.VESSEL_CATEGORY)),  # vessel type index
             }),
             'targets': spaces.Tuple([
                 spaces.Dict({
@@ -162,27 +162,12 @@ class MarineEnv(gym.Env):
                     'target_speed': spaces.Box(low=-10, high=20, shape=(), dtype=np.float32),
                     'tbc': spaces.Box(low=-100, high=100, shape=(), dtype=np.float32),
                     'tcpa': spaces.Box(low=0, high=100, shape=(), dtype=np.float32),
-                }) for _ in range(self.total_targets)  # assuming targets are considered dangerous
+                    'aspect': spaces.Discrete(len(self.ASPECT_CATEGORY)),  # head_on, crossing, overtaking
+                    'stand_on': spaces.Discrete(2),  # 0 - give way, 1 - stand-on
+                    'vessel_category': spaces.Discrete(len(BaseShip.VESSEL_CATEGORY)),  # vessel type index
+                }) for _ in range(3)  # 3 top dangerous targets
             ])
         })
-
-    @property
-    def wp_distance(self) -> float:
-        return self.own_ship.calculate_distance(self.waypoint)
-
-    @property
-    def wp_eta(self) -> float:
-        # will be recalculated when calling reset()
-        return 60 * self.wp_distance / self.own_ship.speed
-
-    @property
-    def wp_relative_bearing(self) -> float:
-        return self.own_ship.calculate_relative_bearing(self.waypoint)
-
-    @property
-    def wp_target_eta(self) -> float:
-        # will ALWAYS be calculated when handling the state
-        return 0.0
 
     def step(self, action) -> tuple[ObsType, float, bool, bool, dict[str, int]]:
 
@@ -490,7 +475,7 @@ class MarineEnv(gym.Env):
             self.waypoint.lat, self.waypoint.lon = place_waypoint(3, self.ENV_RANGE - 1)
 
             # calculate target eta, calculated using initial speed
-            target_eta = self.wp_eta
+            target_eta = self.waypoint.wp_eta(self.own_ship)
 
             own_ship_data = self._generate_own_ship_data()
             own_ship_data['wp_eta'] = target_eta
@@ -519,7 +504,7 @@ class MarineEnv(gym.Env):
             # place the waypoint
             self.waypoint.lat, self.waypoint.lon = place_waypoint(12, 17)
 
-            target_eta = self.wp_eta
+            target_eta = self.waypoint.wp_eta(self.own_ship)
             own_ship_data = self._generate_own_ship_data()
             # course to match wp + minor deviation
             self.own_ship.course = self.own_ship.calculate_true_bearing(self.waypoint) + random.uniform(-5, 5)

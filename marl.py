@@ -11,7 +11,7 @@ from gymnasium.spaces.utils import flatten_space
 import numpy as np
 
 from utils import plane_sailing_position
-from vessels import OwnShip, Target, StaticObject
+from vessels import OwnShip, Target, StaticObject, BaseShip
 
 
 class MarineEnv(gym.Env):
@@ -26,7 +26,7 @@ class MarineEnv(gym.Env):
     INITIAL_LON: float = 0.0
     ENV_RANGE: int = 20  # defines the size of the field
 
-    # own ship properties
+    # ship properties
     MAX_TURN_ANGLE: int = 20  # rate of turn defaults to 20 deg per min
     MAX_SPEED_CHANGE: float = 0.5  # rate of speed change knots / min
     WP_REACH_THRESHOLD: float = 0.2  # in nautical miles, terminates an episode
@@ -34,40 +34,35 @@ class MarineEnv(gym.Env):
     # target limits collision avoidance settings
     CPA_THRESHOLD: float = 1.0  # in nautical miles
     TCPA_THRESHOLD: float = 15  # in minutes
-    # limits at witch the onw ship should act
+
+    # limits defining act of the stand-on vessel
+    CPA_STAND_ON_THRESHOLD: float = 0.3
+    TCPA_STAND_ON_THRESHOLD: float = 3
+
+    # limits at witch collision is considered
     CPA_LIMIT: float = 0.1
     TCPA_LIMIT: float = 1
 
-    ASPECTS = [
-        'static',
-        'head-on',
-        'crossing',
-    ]
+    ASPECT_CATEGORY = {
+        'head_on': 0,  # Rule 14
+        'crossing': 1,  # Rule 15
+        'overtaking': 2,  # Rule 13
+    }
 
     # Constants for rewards and penalties
     CPA_AVOIDANCE_THRESHOLD = 1.2  # CPA threshold for excessive avoidance
     AVOIDANCE_PENALTY_FACTOR = 5.0  # Scaling factor for excessive avoidance penalty
     COLLISION_PENALTY: int = -300  # Large penalty for collision
-    # CPA_VIOLATION_PENALTY: int = -75  # Penalty for violating CPA threshold
-    # CPA_SAFE_REWARD: int = 15  # Reward for maintaining safe CPA
-    # STARBOARD_TURN_REWARD: int = 2  # Reward for correct starboard turn
-    # TURN_PENALTY: int = -10  # Penalty for incorrect port turn
-    # TURN_REWARD: int = 2
-    # SPEED_PENALTY: int = -5
-    # SPEED_REWARD: int = 10
-    # UNNECESSARY_MOVEMENT_PENALTY: int = -1  # Penalty for unnecessary maneuvers
-    # COLREG_VIOLATION: int = -50
+
     # # WP rewards and penalties
     WP_REACH_REWARD: int = 100  # reward for reaching the waypoint
-    # ETA_REWARD: int = 2
-    # ETA_PENALTY: int = -5
     ETA_VIOLATION_PENALTY: int = -50
 
     def __init__(
             self,
             # environment properties
             render_mode=None,
-            continuous: bool = False,
+            continuous: bool = True,
             timescale: int = 1,  # defines the step size, defaults to 1 min step
             training_stage: int = 1,  # defines different training stages, 0 for no training
             total_targets: int = 1,  # minimum targets should be one
@@ -160,6 +155,7 @@ class MarineEnv(gym.Env):
                 'wp_eta': spaces.Box(low=0, high=300, shape=(), dtype=np.float32),
                 'wp_relative_bearing': spaces.Box(low=-180, high=180, shape=(), dtype=np.float32),
                 'wp_target_eta': spaces.Box(low=0, high=300, shape=(), dtype=np.float32),
+                'vessel_category': spaces.Discrete(len(BaseShip.VESSEL_CATEGORY)),  # vessel type index
             }),
             'targets': spaces.Tuple([
                 spaces.Dict({
@@ -173,7 +169,10 @@ class MarineEnv(gym.Env):
                     'target_speed': spaces.Box(low=-10, high=20, shape=(), dtype=np.float32),
                     'tbc': spaces.Box(low=-100, high=100, shape=(), dtype=np.float32),
                     'tcpa': spaces.Box(low=0, high=100, shape=(), dtype=np.float32),
-                }) for _ in range(3)  # 3 targets are considered dangerous
+                    'aspect': spaces.Discrete(len(self.ASPECT_CATEGORY)),  # head_on, crossing, overtaking
+                    'stand_on': spaces.Discrete(2),  # 0 - give way, 1 - stand-on
+                    'vessel_category': spaces.Discrete(len(BaseShip.VESSEL_CATEGORY)),  # vessel type index
+                }) for _ in range(3)  # 3 top dangerous targets
             ])
         })
 
@@ -184,11 +183,6 @@ class MarineEnv(gym.Env):
 
         if waypoint is None:
             waypoint = self.waypoint
-
-        # waypoint.wp_distance = last_wp_distance
-        # waypoint.wp_eta = last_wp_eta
-        # waypoint.wp_relative_bearing = last_wp_relative_bearing
-        # waypoint.wp_target_eta = last_tgt_eta
 
         # update the params based on action
         if isinstance(self.action_space, spaces.Discrete):
@@ -265,7 +259,8 @@ class MarineEnv(gym.Env):
                     previous_obs = self.observations[i]
                     current_obs = self._flatten_observation(raw_observation)
 
-                    reward, terminated, truncated, info = self.calculate_reward(previous_obs, current_obs, agent, self.waypoint)
+                    reward, terminated, truncated, info = self.calculate_reward(previous_obs, current_obs, agent,
+                                                                                self.waypoint)
 
                 self.observations[i] = current_obs
 
@@ -816,7 +811,7 @@ class MarineEnv(gym.Env):
 
     def _generate_dangerous_targets_state(self, ship: Union[Target, OwnShip]):
         # initialize empty targets list with zero-filled entries
-        targets_data = self._generate_zero_target_data(3) # size of the observation space
+        targets_data = self._generate_zero_target_data(3)  # size of the observation space
 
         if ship.detected_targets:
             # Sort detected targets by dangerous coefficient (CPA ** 2 * TCPA) and take the top n
@@ -1028,7 +1023,7 @@ if __name__ == '__main__':
         training=False,
         seed=42,
         total_targets=1,
-        marl=True,
+        marl=False,
     )
     env = MarineEnv(**env_kwargs)
     agent = PPO('MlpPolicy', env=env).load("project_logs/optuna/best_model/best_model.zip", device='cpu')

@@ -31,11 +31,11 @@ class StaticObject:
 
 class BaseShip:
     VESSEL_CATEGORY = {
-        'pwd': 1,  # power-driven vessel, lowest priority
-        'sv': 2,  # sailing vessel not propelled by machinery
-        'fv': 3,  # fishing vessel engaged in fishing
-        'ram': 4,  # vessel restricted in ability to manoeuvre
-        'nuc': 5,  # not under command, highes priority
+        'pwd': 0,  # power-driven vessel, lowest priority
+        'sv': 1,  # sailing vessel not propelled by machinery
+        'fv': 2,  # fishing vessel engaged in fishing
+        'ram': 3,  # vessel restricted in ability to manoeuvre
+        'nuc': 4,  # not under command, highes priority
     }
 
     def __init__(
