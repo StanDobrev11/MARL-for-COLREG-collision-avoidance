@@ -156,6 +156,7 @@ class MarineEnv(gym.Env):
                     'aspect': spaces.Discrete(len(self.ASPECT_CATEGORY)),  # head_on, crossing, overtaking
                     'bcr': spaces.Box(low=-50, high=50, shape=(), dtype=np.float32),
                     'cpa': spaces.Box(low=0, high=50, shape=(), dtype=np.float32),
+                    'cpa_threshold': spaces.Box(low=0, high=50, shape=(), dtype=np.float32),
                     'stand_on': spaces.Discrete(2),  # 0 - give way, 1 - stand-on
                     'target_course': spaces.Box(low=0, high=360, shape=(), dtype=np.float32),
                     'target_distance': spaces.Box(low=0, high=50, shape=(), dtype=np.float32),
