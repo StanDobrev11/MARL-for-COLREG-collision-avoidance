@@ -131,6 +131,14 @@ class Target(BaseShip):
         self.is_dangerous: bool = False  # defines the status of the target
         self.__stand_on: [bool, None] = None  # defines if the target gives way or is a stand-on vessel
         self.__aspect: Optional[str] = None  # the aspect of the target as viewed from own ship
+        self.__cpa_threshold: Optional[float] = None
+
+    @property
+    def cpa_threshold(self):
+        return self.__cpa_threshold
+
+    def set_cpa_threshold(self, base_cpa: float, traffic_condition: int) -> None:
+        self.__cpa_threshold = base_cpa * traffic_condition - self.vessel_category / 10
 
     @property
     def aspect(self) -> str:
@@ -202,7 +210,7 @@ class Target(BaseShip):
 
     def __repr__(self):
         return (f'{self.__class__.__name__}:\n'
-                f'Name: {self.__name}\n'
+                f'Name: {self. name}\n'
                 f'Position: {self.lat, self.lon}\n'
                 f'Course: {self.course:.2f}\n'
                 f'Speed: {self.speed:.2f}\n'
@@ -210,6 +218,7 @@ class Target(BaseShip):
                 f'Distance: {self.distance:.2f}\n'
                 f'Relative Course: {self.relative_course:.2f}\n'
                 f'Relative Speed: {self.relative_speed:.2f}\n'
+                f'CPA Threshold: {self.cpa_threshold:.2f}\n'
                 f'CPA: {self.cpa:.2f}\n'
                 f'TCPA: {self.tcpa:.2f}\n'
                 f'BCR: {self.bcr:.2f}\n'
@@ -349,13 +358,14 @@ class OwnShip(BaseShip):
         else:
             target.stand_on = False
 
-    def update_target(self, target: 'Target') -> None:
+    def update_target(self, target: 'Target', *args) -> None:
         target.relative_course = self.calculate_relative_course(target)
         target.relative_speed = self.calculate_relative_speed(target)
         target.relative_bearing = self.calculate_relative_bearing(target)
         target.distance = self.calculate_distance((target.lat, target.lon))
         target.cpa, target.tcpa = self.calculate_cpa_tcpa(target)
         target.bcr, target.tbc = self.calculate_bcr_tbc(target)
+        target.set_cpa_threshold(*args)
         target.set_aspect(self)
         target.set_stand_on(self)
 

@@ -17,6 +17,12 @@ from vessels import OwnShip, Target, StaticObject, BaseShip
 class MarineEnv(gym.Env):
     metadata = {'render_modes': ['human', 'rgb_array'], 'render_fps': 30}
 
+    TRAFFIC_CONDITION = {
+        'heavy': 0.4,
+        'moderate': 0.7,
+        'light': 1.0,
+    }
+
     ASPECT_CATEGORY = [
         'head_on',  # Rule 14
         'crossing',  # Rule 15
@@ -39,20 +45,21 @@ class MarineEnv(gym.Env):
     WP_REACH_THRESHOLD: float = 0.2  # in nautical miles, terminates an episode
 
     # target limits collision avoidance settings
-    CPA_THRESHOLD: float = 1.0  # in nautical miles
+    BASE_CPA_THRESHOLD: float = 1.0  # in nautical miles
     TCPA_THRESHOLD: float = 15  # in minutes
 
     # limits defining act of the stand-on vessel
-    CPA_STAND_ON_THRESHOLD: float = 0.3
+    BASE_CPA_STAND_ON_THRESHOLD: float = 0.3
     TCPA_STAND_ON_THRESHOLD: float = 3
 
     # limits at witch collision is considered
-    CPA_LIMIT: float = 0.1
+    BASE_CPA_LIMIT: float = 0.1
     TCPA_LIMIT: float = 1
 
     # Constants for rewards and penalties
     CPA_AVOIDANCE_THRESHOLD = 1.2  # CPA threshold for excessive avoidance
     AVOIDANCE_PENALTY_FACTOR = 5.0  # Scaling factor for excessive avoidance penalty
+
     COLLISION_PENALTY: int = -300  # Large penalty for collision
 
     # # WP rewards and penalties
@@ -69,6 +76,7 @@ class MarineEnv(gym.Env):
             total_targets: int = 1,  # minimum targets should be one
             training: bool = True,
             seed: Optional[int] = None,
+            traffic_condition: str = 'light',
     ):
         super(MarineEnv, self).__init__()
 
@@ -77,6 +85,7 @@ class MarineEnv(gym.Env):
         self.training_stage = training_stage
         self.total_targets = total_targets
         self.seed = self._set_global_seed(seed)
+        self.traffic_condition = traffic_condition
 
         # initialize the environment bounds
         self.lat_bounds: Tuple[float, float] = (self.INITIAL_LAT, self.INITIAL_LAT + self.ENV_RANGE / 60)
@@ -177,7 +186,8 @@ class MarineEnv(gym.Env):
         self.step_counter += 1
 
         # extract own ship params from the current state
-        course, speed, last_wp_distance, last_wp_eta, last_wp_relative_bearing, last_tgt_eta = self.observation[:6]
+        course, speed  = self.observation[:2]
+        last_wp_distance, last_wp_eta, last_wp_relative_bearing, last_tgt_eta = self.observation[3:7]
 
         # update the params based on action
         if isinstance(self.action_space, spaces.Discrete):
@@ -198,7 +208,7 @@ class MarineEnv(gym.Env):
         self.own_ship.update_position(time_interval=self.timescale, clip_lat=self.lat_bounds, clip_lon=self.lon_bounds)
 
         # generate own state data
-        own_ship_data = self._generate_own_ship_data()
+        own_ship_data = self._generate_own_ship_data(self.own_ship, self.waypoint)
         own_ship_data['wp_target_eta'] = last_tgt_eta - self.timescale
 
         # move/update all detected targets
@@ -323,14 +333,14 @@ class MarineEnv(gym.Env):
                     if not target.is_dangerous:
                         continue
                     # huge penalty for collision (immediate termination)
-                    if target.distance < self.CPA_LIMIT:
+                    if target.distance < self.BASE_CPA_LIMIT:
                         reward += self.COLLISION_PENALTY
                         info['terminated'] = 'Collision!'
                         terminated = True
                         break
 
                     # CPA penalty (capped to prevent over-penalization)
-                    if target.distance < self.CPA_THRESHOLD:
+                    if target.distance < self.BASE_CPA_THRESHOLD:
                         reward -= min(20, (2 / (target.distance + 0.1) ** 2)) * self.timescale
 
                     # penalize excessive avoidance (CPA > 1.2 NM)
@@ -341,7 +351,7 @@ class MarineEnv(gym.Env):
 
                     # TCPA penalty/reward (COLREG compliance)
                     if target.tcpa < self.TCPA_THRESHOLD - 3:
-                        if target.cpa >= self.CPA_THRESHOLD:
+                        if target.cpa >= self.BASE_CPA_THRESHOLD:
                             if course_change >= 0:  # reward only if turning starboard or going straight
                                 reward += target.tcpa * 2 * self.timescale
                             else:  # penalize if cleared via port turn
@@ -356,7 +366,7 @@ class MarineEnv(gym.Env):
                             reward -= abs(course_change) * 5  # Increased penalty
 
                         # target to port bow
-                        if -10 <= target.relative_bearing <= 0 and target.cpa < self.CPA_THRESHOLD:
+                        if -10 <= target.relative_bearing <= 0 and target.cpa < self.BASE_CPA_THRESHOLD:
                             if target.bcr < 0 and target.cpa > 0.5:  # alter to port if crossing stern
                                 if course_change < 0:  # correct (port turn)
                                     reward += 2 * self.timescale
@@ -372,7 +382,7 @@ class MarineEnv(gym.Env):
                                 reward += 1 * self.timescale
 
                         # target to starboard bow
-                        if 0 < target.relative_bearing <= 10 and target.cpa < self.CPA_THRESHOLD:
+                        if 0 < target.relative_bearing <= 10 and target.cpa < self.BASE_CPA_THRESHOLD:
                             if course_change > 0:  # correct (starboard turn)
                                 reward += course_change
                             else:  # incorrect (port turn or no turn)
@@ -382,7 +392,7 @@ class MarineEnv(gym.Env):
                                 reward += 1 * self.timescale
 
                         # target to starboard side (10 <= relative_bearing <= 75)
-                        if 10 <= target.relative_bearing <= 75 and target.cpa < self.CPA_THRESHOLD:
+                        if 10 <= target.relative_bearing <= 75 and target.cpa < self.BASE_CPA_THRESHOLD:
                             if course_change > 0:  # correct (starboard turn)
                                 reward += course_change
                             elif speed_change < 0:  # slow down is also acceptable
@@ -391,7 +401,7 @@ class MarineEnv(gym.Env):
                                 reward -= abs(course_change) * 5
 
                         # target abaft the beam (75 < relative_bearing <= 112.5)
-                        if 75 < target.relative_bearing <= 112.5 and target.cpa < self.CPA_THRESHOLD:
+                        if 75 < target.relative_bearing <= 112.5 and target.cpa < self.BASE_CPA_THRESHOLD:
                             if speed_change < 0:  # slow down is the only option
                                 # reward += 2 * self.timescale
                                 reward += 2 * self.timescale * speed_change ** 4
@@ -668,7 +678,7 @@ class MarineEnv(gym.Env):
 
             # Fill in detected targets and set the targets to be dangerous
             for i, target in enumerate(self.own_ship.dangerous_targets):
-                if target.cpa <= self.CPA_THRESHOLD and target.tcpa <= self.TCPA_THRESHOLD:
+                if target.cpa <= self.BASE_CPA_THRESHOLD and target.tcpa <= self.TCPA_THRESHOLD:
                     target.is_dangerous = True
                     targets_data[i] = self._generate_actual_target_data(target)
                 else:
@@ -772,7 +782,7 @@ class MarineEnv(gym.Env):
             course=target_course,
             speed=target_speed,
         )
-        self.own_ship.update_target(target)
+        self.own_ship.update_target(target, self.BASE_CPA_THRESHOLD, self.TRAFFIC_CONDITION[self.traffic_condition])
 
         return target
 
@@ -811,7 +821,10 @@ class MarineEnv(gym.Env):
         for key in self.OWN_SHIP_PARAMS:
             result[key] = getattr(agent, key)
         for key in self.WP_PARAMS:
-            result[key] = getattr(waypoint, key)
+            try:
+                result[key] = getattr(waypoint, key)(agent)
+            except TypeError:
+                result[key] = getattr(waypoint, key)
 
         return result
 
@@ -872,7 +885,7 @@ if __name__ == '__main__':
         total_reward = 0
         for _ in range(int(400 / env.timescale)):
             # action = agent.predict(state, deterministic=True)
-            action = [[1, 1], 0]
+            action = [[0, 0], 0]
             next_state, reward, terminated, truncated, info = env.step(action[0])
             total_reward += reward
 
