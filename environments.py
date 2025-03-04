@@ -110,8 +110,8 @@ class MarineEnv(gym.Env):
         self.waypoints = []
 
         # extract params
-        self.OWN_SHIP_PARAMS = [key for key in self._define_observation_space()['own_ship'].spaces.keys()][:2]
-        self.WP_PARAMS = [key for key in self._define_observation_space()['own_ship'].spaces.keys()][2:]
+        self.OWN_SHIP_PARAMS = [key for key in self._define_observation_space()['own_ship'].spaces.keys()][:3]
+        self.WP_PARAMS = [key for key in self._define_observation_space()['own_ship'].spaces.keys()][3:]
         self.TARGET_PARAMS = [key for key in self._define_observation_space()['targets'][0].spaces.keys()]
 
         # pygame setup
@@ -303,7 +303,7 @@ class MarineEnv(gym.Env):
         speed_change = current_speed - previous_speed  # negative means slowing down
 
         # reaching the wp -> large reward and episode termination
-        if self.wp_distance < self.WP_REACH_THRESHOLD:
+        if self.waypoint.wp_distance(self.own_ship) < self.WP_REACH_THRESHOLD:
             info['terminated'] = 'WP Reached!'
             return self.WP_REACH_REWARD, True, False, info
 
@@ -864,7 +864,7 @@ if __name__ == '__main__':
     )
     env = MarineEnv(**env_kwargs)
     # agent = PPO('MlpPolicy', env=env).load("ppo.zip", device='cpu')
-    for i in range(5):
+    for i in range(1):
         state, _ = env.reset()
         print(env.training_stage)
         print(env.own_ship.detected_targets)

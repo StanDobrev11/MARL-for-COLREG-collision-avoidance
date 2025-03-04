@@ -75,7 +75,7 @@ class BaseShip:
         return self.__class__.__name__
 
     @property
-    def category(self):
+    def vessel_category(self):
         return self.VESSEL_CATEGORY[self.kind]
 
     def update_position(
@@ -183,10 +183,10 @@ class Target(BaseShip):
             self.set_stand_on(agent)
 
     def set_stand_on(self, agent: 'OwnShip') -> None:
-        if self.category < agent.category:
+        if self.vessel_category < agent.vessel_category:
             self.__stand_on = False
 
-        elif self.category > agent.category:
+        elif self.vessel_category > agent.vessel_category:
             self.__stand_on = True
         # both vessels are same kind so the responsibility will be resolved using the aspect
 
