@@ -33,6 +33,14 @@ class BaseShip:
 
     COUNT = 1
 
+    VESSEL_CPA_MULTIPLIER = {
+        'pwd': 1,  # power-driven vessel, lowest priority
+        'sv': 0.6,  # sailing vessel not propelled by machinery
+        'fv': 0.6,  # fishing vessel engaged in fishing
+        'ram': 1.2,  # vessel restricted in ability to manoeuvre
+        'nuc': 1.2,
+    }
+
     VESSEL_CATEGORY = {
         'pwd': 0,  # power-driven vessel, lowest priority
         'sv': 1,  # sailing vessel not propelled by machinery
@@ -137,8 +145,9 @@ class Target(BaseShip):
     def cpa_threshold(self):
         return self.__cpa_threshold
 
-    def set_cpa_threshold(self, base_cpa: float, traffic_condition: int) -> None:
-        self.__cpa_threshold = base_cpa * traffic_condition - self.vessel_category / 10
+    def set_cpa_threshold(self, base_cpa: float, traffic_multiplier: float, confined_multiplier: float) -> None:
+        vessel_penalty = self.VESSEL_CPA_MULTIPLIER[self.kind]  # Scaling vessel category effect
+        self.__cpa_threshold = base_cpa * traffic_multiplier * confined_multiplier * vessel_penalty
 
     @property
     def aspect(self) -> str:
@@ -394,7 +403,7 @@ class OwnShip(BaseShip):
 
 
 if __name__ == '__main__':
-    target_ship = Target(position=(0.05, 0.05), course=330, speed=5)
-    own_ship = OwnShip(position=(0.10, 0.0), course=0, speed=10.0)
-    own_ship.update_target(target_ship)
+    target_ship = Target(position=(0.05, 0.05), course=330, speed=5, kind='pwd')
+    own_ship = OwnShip(position=(0.0, 0.0), course=0, speed=10.0)
+    own_ship.update_target(target_ship, 1, 0.4, 0.5)
     print(target_ship)

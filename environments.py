@@ -17,7 +17,7 @@ from vessels import OwnShip, Target, StaticObject, BaseShip
 class MarineEnv(gym.Env):
     metadata = {'render_modes': ['human', 'rgb_array'], 'render_fps': 30}
 
-    TRAFFIC_CONDITION = {
+    TRAFFIC_CONDITION_MULTIPLIER = {
         'heavy': 0.4,
         'moderate': 0.7,
         'light': 1.0,
@@ -77,6 +77,7 @@ class MarineEnv(gym.Env):
             training: bool = True,
             seed: Optional[int] = None,
             traffic_condition: str = 'light',
+            confined_water: bool = False
     ):
         super(MarineEnv, self).__init__()
 
@@ -86,6 +87,7 @@ class MarineEnv(gym.Env):
         self.total_targets = total_targets
         self.seed = self._set_global_seed(seed)
         self.traffic_condition = traffic_condition
+        self.confined_water = confined_water
 
         # initialize the environment bounds
         self.lat_bounds: Tuple[float, float] = (self.INITIAL_LAT, self.INITIAL_LAT + self.ENV_RANGE / 60)
@@ -134,6 +136,10 @@ class MarineEnv(gym.Env):
         self.clock = None
         self.vessel_size = 5  # vessel radius in pixels
 
+    @property
+    def confined_water_multiplier(self) -> float:
+        return 0.5 if self.confined_water else 1
+
     def _set_global_seed(self, seed=None) -> Union[int, None]:
         """Sets the global random seed for reproducibility."""
         if seed is not None:
@@ -163,9 +169,9 @@ class MarineEnv(gym.Env):
             'targets': spaces.Tuple([
                 spaces.Dict({
                     'aspect': spaces.Discrete(len(self.ASPECT_CATEGORY)),  # head_on, crossing, overtaking
-                    'bcr': spaces.Box(low=-50, high=50, shape=(), dtype=np.float32),
+                    'bcr': spaces.Box(low=-150, high=150, shape=(), dtype=np.float32),
                     'cpa': spaces.Box(low=0, high=50, shape=(), dtype=np.float32),
-                    'cpa_threshold': spaces.Box(low=0, high=50, shape=(), dtype=np.float32),
+                    'cpa_threshold': spaces.Box(low=0.05, high=2, shape=(), dtype=np.float32),
                     'stand_on': spaces.Discrete(2),  # 0 - give way, 1 - stand-on
                     'target_course': spaces.Box(low=0, high=360, shape=(), dtype=np.float32),
                     'target_distance': spaces.Box(low=0, high=50, shape=(), dtype=np.float32),
@@ -173,8 +179,8 @@ class MarineEnv(gym.Env):
                     'target_relative_course': spaces.Box(low=0, high=360, shape=(), dtype=np.float32),
                     'target_relative_speed': spaces.Box(low=0, high=50, shape=(), dtype=np.float32),
                     'target_speed': spaces.Box(low=-10, high=20, shape=(), dtype=np.float32),
-                    'tbc': spaces.Box(low=-100, high=100, shape=(), dtype=np.float32),
-                    'tcpa': spaces.Box(low=0, high=100, shape=(), dtype=np.float32),
+                    'tbc': spaces.Box(low=-300, high=300, shape=(), dtype=np.float32),
+                    'tcpa': spaces.Box(low=0, high=300, shape=(), dtype=np.float32),
                     'vessel_category': spaces.Discrete(len(BaseShip.VESSEL_CATEGORY)),  # vessel type index
                 }) for _ in range(3)  # 3 top dangerous targets
             ])
@@ -214,7 +220,7 @@ class MarineEnv(gym.Env):
         # move/update all detected targets
         for target in self.own_ship.detected_targets:
             target.update_position(time_interval=self.timescale)
-            self.own_ship.update_target(target)
+            self.own_ship.update_target(target, self.BASE_CPA_THRESHOLD, self.TRAFFIC_CONDITION_MULTIPLIER[self.traffic_condition], self.confined_water_multiplier)
 
             # check target coordinates and remove from list if out of bounds
             if target.lat <= self.lat_bounds[0] or target.lat >= self.lon_bounds[1] or \
@@ -782,7 +788,7 @@ class MarineEnv(gym.Env):
             course=target_course,
             speed=target_speed,
         )
-        self.own_ship.update_target(target, self.BASE_CPA_THRESHOLD, self.TRAFFIC_CONDITION[self.traffic_condition])
+        self.own_ship.update_target(target, self.BASE_CPA_THRESHOLD, self.TRAFFIC_CONDITION_MULTIPLIER[self.traffic_condition], self.confined_water_multiplier)
 
         return target
 
