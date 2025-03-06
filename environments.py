@@ -23,13 +23,6 @@ class MarineEnv(gym.Env):
         'light': 1.0,
     }
 
-    ASPECT_CATEGORY = [
-        'head_on',  # Rule 14
-        'crossing',  # Rule 15
-        'overtaking',  # Rule 13
-        'adrift',  # underway but stopped and making no way
-    ]
-
     OWN_SHIP_PARAMS: List[str] = []
     WP_PARAMS: List[str] = []
     TARGET_PARAMS: List[str] = []
@@ -168,7 +161,7 @@ class MarineEnv(gym.Env):
             }),
             'targets': spaces.Tuple([
                 spaces.Dict({
-                    'aspect': spaces.Discrete(len(self.ASPECT_CATEGORY)),  # head_on, crossing, overtaking
+                    'aspect': spaces.Discrete(len(BaseShip.ASPECT_CATEGORY)),  # head_on, crossing, overtaking
                     'bcr': spaces.Box(low=-150, high=150, shape=(), dtype=np.float32),
                     'cpa': spaces.Box(low=0, high=50, shape=(), dtype=np.float32),
                     'cpa_threshold': spaces.Box(low=0.05, high=2, shape=(), dtype=np.float32),
@@ -192,7 +185,7 @@ class MarineEnv(gym.Env):
         self.step_counter += 1
 
         # extract own ship params from the current state
-        course, speed  = self.observation[:2]
+        course, speed = self.observation[:2]
         last_wp_distance, last_wp_eta, last_wp_relative_bearing, last_tgt_eta = self.observation[3:7]
 
         # update the params based on action
@@ -220,7 +213,9 @@ class MarineEnv(gym.Env):
         # move/update all detected targets
         for target in self.own_ship.detected_targets:
             target.update_position(time_interval=self.timescale)
-            self.own_ship.update_target(target, self.BASE_CPA_THRESHOLD, self.TRAFFIC_CONDITION_MULTIPLIER[self.traffic_condition], self.confined_water_multiplier)
+            self.own_ship.update_target(target, self.BASE_CPA_THRESHOLD,
+                                        self.TRAFFIC_CONDITION_MULTIPLIER[self.traffic_condition],
+                                        self.confined_water_multiplier)
 
             # check target coordinates and remove from list if out of bounds
             if target.lat <= self.lat_bounds[0] or target.lat >= self.lon_bounds[1] or \
@@ -495,7 +490,7 @@ class MarineEnv(gym.Env):
             # calculate target eta, calculated using initial speed
             target_eta = self.waypoint.wp_eta(self.own_ship)
 
-            own_ship_data = self._generate_own_ship_data()
+            own_ship_data = self._generate_own_ship_data(self.own_ship, self.waypoint)
             own_ship_data['wp_eta'] = target_eta
             own_ship_data['wp_target_eta'] = target_eta
 
@@ -731,7 +726,7 @@ class MarineEnv(gym.Env):
         own_speed = self.own_ship.speed
 
         if aspect is None:
-            aspect = random.choice(self.ASPECT_CATEGORY)
+            aspect = random.choice(list(BaseShip.ASPECT_CATEGORY.keys()))
         # Target ship
         # if the relative course == 180 + relative bearing, the target is on a collision course.
         # to generate relative course != to 180 + relative bearing bss CPA, we need distance or TCPA
@@ -788,7 +783,9 @@ class MarineEnv(gym.Env):
             course=target_course,
             speed=target_speed,
         )
-        self.own_ship.update_target(target, self.BASE_CPA_THRESHOLD, self.TRAFFIC_CONDITION_MULTIPLIER[self.traffic_condition], self.confined_water_multiplier)
+        self.own_ship.update_target(target, self.BASE_CPA_THRESHOLD,
+                                    self.TRAFFIC_CONDITION_MULTIPLIER[self.traffic_condition],
+                                    self.confined_water_multiplier)
 
         return target
 
@@ -809,7 +806,10 @@ class MarineEnv(gym.Env):
             target_features.extend(target.values())  # Flatten each target dictionary
 
         # Combine all into a single NumPy array (1D)
-        flat_obs = np.array(own_ship_features + target_features, dtype=np.float32)
+        try:
+            flat_obs = np.array(own_ship_features + target_features, dtype=np.float32)
+        except:
+            a = 5
 
         return flat_obs
 
@@ -879,7 +879,7 @@ if __name__ == '__main__':
         timescale=1 / 6,
         training=False,
         seed=42,
-        total_targets=3,
+        total_targets=1,
     )
     env = MarineEnv(**env_kwargs)
     # agent = PPO('MlpPolicy', env=env).load("ppo.zip", device='cpu')
