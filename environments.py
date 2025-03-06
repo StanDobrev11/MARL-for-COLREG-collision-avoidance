@@ -70,7 +70,8 @@ class MarineEnv(gym.Env):
             training: bool = True,
             seed: Optional[int] = None,
             traffic_condition: str = 'light',
-            confined_water: bool = False
+            confined_water: bool = False,
+            visibility: int = 12,  # set the visibility for COLREG avoidance
     ):
         super(MarineEnv, self).__init__()
 
@@ -78,9 +79,11 @@ class MarineEnv(gym.Env):
         self.step_counter = 0
         self.training_stage = training_stage
         self.total_targets = total_targets
+        self.__total_targets = 3  # size of the targets in the observation space
         self.seed = self._set_global_seed(seed)
         self.traffic_condition = traffic_condition
         self.confined_water = confined_water
+        self.visibility = visibility
 
         # initialize the environment bounds
         self.lat_bounds: Tuple[float, float] = (self.INITIAL_LAT, self.INITIAL_LAT + self.ENV_RANGE / 60)
@@ -175,7 +178,7 @@ class MarineEnv(gym.Env):
                     'tbc': spaces.Box(low=-300, high=300, shape=(), dtype=np.float32),
                     'tcpa': spaces.Box(low=0, high=300, shape=(), dtype=np.float32),
                     'vessel_category': spaces.Discrete(len(BaseShip.VESSEL_CATEGORY)),  # vessel type index
-                }) for _ in range(3)  # 3 top dangerous targets
+                }) for _ in range(self.__total_targets)  # 3 top dangerous targets
             ])
         })
 
@@ -664,7 +667,7 @@ class MarineEnv(gym.Env):
 
     def _generate_dangerous_targets_state(self):
         # initialize empty targets list with zero-filled entries
-        targets_data = self._generate_zero_target_data(self.total_targets)
+        targets_data = self._generate_zero_target_data(self.__total_targets)  # match the observation space
 
         if self.own_ship.detected_targets:
             # Sort detected targets by dangerous coefficient (CPA ** 2 * TCPA) and take the top n
@@ -731,21 +734,25 @@ class MarineEnv(gym.Env):
         # if the relative course == 180 + relative bearing, the target is on a collision course.
         # to generate relative course != to 180 + relative bearing bss CPA, we need distance or TCPA
         # to calculate TCPA we need relative speed
-        if aspect in ['static', 'crossing']:
+        category = 'pwd'
+
+        if aspect in ['crossing']:
             initial_distance = np.random.uniform(7, 9)
         elif aspect in ['overtaking']:
             initial_distance = np.random.uniform(2, 3)
         elif aspect in ['adrift']:
             initial_distance = np.random.uniform(2, 10)
+            category = random.choice(list(BaseShip.ASPECT_CATEGORY.keys()))
         else:
             initial_distance = np.random.uniform(12, 19)
 
-        cpa = np.random.random_sample() * 2 - 1  # random CPA between -1 and 1 NM
+        cpa_multiplier = 1 if category == 'pwd' else BaseShip.VESSEL_CPA_MULTIPLIER[category]
+        cpa = np.random.random_sample() * 2 - cpa_multiplier  # random CPA between -1 and 1 NM
 
         # define the position of the target vessel to comply with ColReg
         relative_bearing = None
         relative_speed = None
-        if aspect == 'head-on':
+        if aspect == 'head_on':
             relative_bearing = np.random.uniform(-5, 5)  # Relative bearing in degrees
             relative_speed = np.random.uniform(5, 15) + own_speed
         elif aspect == 'adrift':
@@ -782,7 +789,13 @@ class MarineEnv(gym.Env):
             position=(target_lat, target_lon),
             course=target_course,
             speed=target_speed,
+            kind=category,
         )
+
+        # set the visibility of the target
+        if initial_distance >= self.visibility:
+            target.visible = False
+
         self.own_ship.update_target(target, self.BASE_CPA_THRESHOLD,
                                     self.TRAFFIC_CONDITION_MULTIPLIER[self.traffic_condition],
                                     self.confined_water_multiplier)
@@ -879,7 +892,7 @@ if __name__ == '__main__':
         timescale=1 / 6,
         training=False,
         seed=42,
-        total_targets=1,
+        total_targets=5,
     )
     env = MarineEnv(**env_kwargs)
     # agent = PPO('MlpPolicy', env=env).load("ppo.zip", device='cpu')

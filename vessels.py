@@ -23,14 +23,13 @@ class StaticObject:
     def wp_relative_bearing(self, agent: 'OwnShip') -> float:
         return agent.calculate_relative_bearing(self)
 
-    @staticmethod
-    def wp_target_eta() -> float:
+    @property
+    def wp_target_eta(self) -> float:
         # will ALWAYS be calculated when handling the state
         return 0.0
 
 
 class BaseShip:
-
     COUNT = 1
 
     ASPECT_CATEGORY = {
@@ -63,6 +62,7 @@ class BaseShip:
             speed: float = 0.0,
             name: str = None,  # name of the vessel for easy reference
             kind: str = 'pwd',  # type of vessel for setting responsibilities, e.g. power-driven vessel, NUC, etc.
+            visible: bool = True,  # set if the target is in reduced visibility
             min_speed: float = -7.0,
             max_speed: float = 19.0,
     ) -> None:
@@ -71,13 +71,14 @@ class BaseShip:
         self.speed = speed
         self.__name = name
         self.kind = kind
+        self.visible = visible
         self.min_speed = min_speed
         self.max_speed = max_speed
 
         # Assign a name if not provided
         if name is None:
-            self.__name = f'{self.class_name}_{self.COUNT}'
-            self.COUNT += 1  # Increment counter correctly
+            self.__name = f'{self.class_name}_{BaseShip.COUNT}_{self.kind}'
+            BaseShip.COUNT += 1  # Increment counter correctly
         else:
             self.__name = name
 
@@ -144,7 +145,7 @@ class Target(BaseShip):
         self.bcr: float = 0.0  # own ship bow crossing range of the target. If positive - crossing bow of target,
         self.tbc: float = 0.0  # time to BCR
         self.is_dangerous: bool = False  # defines the status of the target
-        self.__stand_on: [bool, None] = None  # defines if the target gives way or is a stand-on vessel
+        self.__stand_on: [bool, None] = True  # defines if the target gives way or is a stand-on vessel
         self.__aspect: Optional[str] = None  # the aspect of the target as viewed from own ship
         self.__cpa_threshold: Optional[float] = None
 
@@ -169,8 +170,8 @@ class Target(BaseShip):
             self.set_aspect(agent)
 
     def set_aspect(self, agent: 'OwnShip') -> None:
-        """Setter to determine the aspect (head-on, crossing, overtaking) based on COLREGs."""
-        if self.aspect == 2 and abs(self.relative_bearing) < 112.5:
+
+        if self.__aspect == 'overtaking' and abs(self.relative_bearing) < 112.5:
             return
 
         course_diff = self.course - agent.course  # Preserve sign
@@ -194,7 +195,7 @@ class Target(BaseShip):
                     np.sign(self.relative_bearing) != np.sign(reversed_relative_bearing):
                 self.__aspect = 'crossing'
             # Overtaking, Rule 13, target sees the vessel abaft the beam
-            if agent.speed > self.speed and 112.5 < abs(reversed_relative_bearing) <= 180:
+            elif 112.5 < abs(reversed_relative_bearing) <= 180 and agent.speed > self.speed:
                 if np.sign(self.relative_bearing) != np.sign(course_diff):
                     self.__aspect = 'overtaking'
                 else:
@@ -217,21 +218,27 @@ class Target(BaseShip):
 
         elif self.vessel_category > agent.vessel_category:
             self.__stand_on = True
-        # both vessels are same kind so the responsibility will be resolved using the aspect
 
-        if self.aspect == 'head_on':
-            self.__stand_on = False
-        elif self.aspect == 'crossing':
-            if self.relative_bearing > 0:
-                self.__stand_on = True
-            else:
+        # both vessels are same kind so the responsibility will be resolved using the aspect
+        else:
+            # check if visible
+            if not self.visible:
+                self.__stand_on = False # no stand-on vessel when visibility is restricted
+                return
+
+            if self.aspect == 0:  # head on
                 self.__stand_on = False
-        elif self.aspect == 'overtaking':
-            self.__stand_on = True
+            elif self.aspect == 1:  # crossing
+                if self.relative_bearing > 0:
+                    self.__stand_on = True
+                else:
+                    self.__stand_on = False
+            elif self.aspect == 2:  # overtaking
+                self.__stand_on = True
 
     def __repr__(self):
         return (f'{self.__class__.__name__}:\n'
-                f'Name: {self. name}\n'
+                f'Name: {self.name}\n'
                 f'Position: {self.lat, self.lon}\n'
                 f'Course: {self.course:.2f}\n'
                 f'Speed: {self.speed:.2f}\n'
@@ -247,7 +254,8 @@ class Target(BaseShip):
                 f'IsDangerous: {self.is_dangerous}\n'
                 f'Aspect: {self.aspect}\n'
                 f'Category: {self.kind}\n'
-                f'Stand On: {self.stand_on}\n')
+                f'Stand On: {self.stand_on}\n'
+                f'Visible: {self.visible}\n')
 
 
 class OwnShip(BaseShip):
