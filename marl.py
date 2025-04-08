@@ -116,8 +116,8 @@ class MarineEnv(gym.Env):
         self.waypoints = []
 
         # extract params
-        self.OWN_SHIP_PARAMS = [key for key in self._define_observation_space()['own_ship'].spaces.keys()][:2]
-        self.WP_PARAMS = [key for key in self._define_observation_space()['own_ship'].spaces.keys()][2:]
+        self.OWN_SHIP_PARAMS = [key for key in self._define_observation_space()['own_ship'].spaces.keys()][:3]
+        self.WP_PARAMS = [key for key in self._define_observation_space()['own_ship'].spaces.keys()][3:]
         self.TARGET_PARAMS = [key for key in self._define_observation_space()['targets'][0].spaces.keys()]
 
         # pygame setup
@@ -151,11 +151,11 @@ class MarineEnv(gym.Env):
             'own_ship': spaces.Dict({
                 'course': spaces.Box(low=0, high=360, shape=(), dtype=np.float32),
                 'speed': spaces.Box(low=-10, high=20, shape=(), dtype=np.float32),
+                'vessel_category': spaces.Discrete(len(BaseShip.VESSEL_CATEGORY)),  # vessel type index
                 'wp_distance': spaces.Box(low=0, high=50, shape=(), dtype=np.float32),
                 'wp_eta': spaces.Box(low=0, high=300, shape=(), dtype=np.float32),
                 'wp_relative_bearing': spaces.Box(low=-180, high=180, shape=(), dtype=np.float32),
                 'wp_target_eta': spaces.Box(low=0, high=300, shape=(), dtype=np.float32),
-                'vessel_category': spaces.Discrete(len(BaseShip.VESSEL_CATEGORY)),  # vessel type index
             }),
             'targets': spaces.Tuple([
                 spaces.Dict({

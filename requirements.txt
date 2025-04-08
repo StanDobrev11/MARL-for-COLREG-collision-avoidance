@@ -7,3 +7,4 @@ tensorboard
 pygame
 optuna
 numpy
+rich

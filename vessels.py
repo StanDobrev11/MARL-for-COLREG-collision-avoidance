@@ -32,11 +32,12 @@ class StaticObject:
 class BaseShip:
     COUNT = 1
 
-    ASPECT_CATEGORY = {
+    ASPECT = {
         'head_on': 0,  # Rule 14
         'crossing': 1,  # Rule 15
         'overtaking': 2,  # Rule 13
         'adrift': 3,  # underway but stopped and making no way
+        'not dangerous': 4, # when the situation is cleared
     }
 
     VESSEL_CPA_MULTIPLIER = {
@@ -160,7 +161,7 @@ class Target(BaseShip):
     @property
     def aspect(self) -> int | None:
         try:
-            return self.ASPECT_CATEGORY.get(self.__aspect)
+            return self.ASPECT.get(self.__aspect)
         except KeyError:
             return None
 
@@ -203,7 +204,7 @@ class Target(BaseShip):
 
     @property
     def stand_on(self) -> bool:
-        return np.float32(self.__stand_on)
+        return self.__stand_on
 
     @stand_on.setter
     def stand_on(self, agent: 'OwnShip') -> None:

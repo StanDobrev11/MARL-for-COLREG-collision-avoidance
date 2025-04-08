@@ -6,7 +6,7 @@ import pygame
 
 from gymnasium import spaces
 from gymnasium.core import ObsType
-from gymnasium.spaces.utils import flatten_space
+from gymnasium.spaces.utils import flatten_space, flatten
 
 import numpy as np
 
@@ -102,7 +102,8 @@ class MarineEnv(gym.Env):
             self.action_space = spaces.Discrete(5)
 
         # define the observation space
-        self.observation_space = flatten_space(self._define_observation_space())
+        self.raw_obs_space = self._define_observation_space()
+        self.observation_space = flatten_space(self.raw_obs_space)
 
         # initialize the state
         self.observation = None
@@ -164,7 +165,7 @@ class MarineEnv(gym.Env):
             }),
             'targets': spaces.Tuple([
                 spaces.Dict({
-                    'aspect': spaces.Discrete(len(BaseShip.ASPECT_CATEGORY)),  # head_on, crossing, overtaking
+                    'aspect': spaces.Discrete(len(BaseShip.ASPECT)),  # head_on, crossing, overtaking
                     'bcr': spaces.Box(low=-150, high=150, shape=(), dtype=np.float32),
                     'cpa': spaces.Box(low=0, high=50, shape=(), dtype=np.float32),
                     'cpa_threshold': spaces.Box(low=0.05, high=2, shape=(), dtype=np.float32),
@@ -178,7 +179,7 @@ class MarineEnv(gym.Env):
                     'tbc': spaces.Box(low=-300, high=300, shape=(), dtype=np.float32),
                     'tcpa': spaces.Box(low=0, high=300, shape=(), dtype=np.float32),
                     'vessel_category': spaces.Discrete(len(BaseShip.VESSEL_CATEGORY)),  # vessel type index
-                }) for _ in range(self.__total_targets)  # 3 top dangerous targets
+                }) for _ in range(3)  # 3 top dangerous targets
             ])
         })
 
@@ -729,7 +730,7 @@ class MarineEnv(gym.Env):
         own_speed = self.own_ship.speed
 
         if aspect is None:
-            aspect = random.choice(list(BaseShip.ASPECT_CATEGORY.keys()))
+            aspect = random.choice(list(BaseShip.ASPECT.keys()))
         # Target ship
         # if the relative course == 180 + relative bearing, the target is on a collision course.
         # to generate relative course != to 180 + relative bearing bss CPA, we need distance or TCPA
@@ -742,7 +743,7 @@ class MarineEnv(gym.Env):
             initial_distance = np.random.uniform(2, 3)
         elif aspect in ['adrift']:
             initial_distance = np.random.uniform(2, 10)
-            category = random.choice(list(BaseShip.ASPECT_CATEGORY.keys()))
+            category = random.choice(list(BaseShip.VESSEL_CATEGORY.keys()))
         else:
             initial_distance = np.random.uniform(12, 19)
 
@@ -802,29 +803,19 @@ class MarineEnv(gym.Env):
 
         return target
 
-    @staticmethod
-    def _flatten_observation(raw_observation):
+    def _flatten_observation(self, raw_observation):
         """
         Flattens a nested dictionary with tuples of dictionaries into a 1D NumPy array.
 
         :param raw_observation: Dict with 'own_ship' and 'targets'
         :return: Flattened NumPy array (axis=1)
         """
-        # Extract and flatten own_ship data
-        own_ship_features = list(raw_observation['own_ship'].values())
-
-        # Extract and flatten targets data
-        target_features = []
-        for target in raw_observation['targets']:  # Assuming `targets` is a tuple of dicts
-            target_features.extend(target.values())  # Flatten each target dictionary
-
-        # Combine all into a single NumPy array (1D)
         try:
-            flat_obs = np.array(own_ship_features + target_features, dtype=np.float32)
-        except:
-            a = 5
-
-        return flat_obs
+            return flatten(self.raw_obs_space, raw_observation)
+        except IndexError:
+            pass
+        except TypeError:
+            pass
 
     def _latlon_to_pixels(self, lat, lon):
         """Convert latitude and longitude to pixel coordinates."""
@@ -839,6 +830,7 @@ class MarineEnv(gym.Env):
         result = dict()
         for key in self.OWN_SHIP_PARAMS:
             result[key] = getattr(agent, key)
+
         for key in self.WP_PARAMS:
             try:
                 result[key] = getattr(waypoint, key)(agent)
@@ -852,7 +844,7 @@ class MarineEnv(gym.Env):
         for _ in range(targets_count):
             spaces_dict = {}
             for key in self.TARGET_PARAMS:
-                spaces_dict[key] = 0.0
+                spaces_dict[key] = 0
 
             result.append(spaces_dict)
 
@@ -891,11 +883,16 @@ if __name__ == '__main__':
         training_stage=2,
         timescale=1 / 6,
         training=False,
-        seed=42,
+        # seed=42,
         total_targets=5,
     )
     env = MarineEnv(**env_kwargs)
-    # agent = PPO('MlpPolicy', env=env).load("ppo.zip", device='cpu')
+    agent = PPO(
+        policy='MlpPolicy',
+        env=env,
+        verbose=0,
+        device='cpu',
+    )
     for i in range(1):
         state, _ = env.reset()
         print(env.training_stage)
@@ -903,8 +900,7 @@ if __name__ == '__main__':
         # env.cpa_limit = 2
         total_reward = 0
         for _ in range(int(400 / env.timescale)):
-            # action = agent.predict(state, deterministic=True)
-            action = [[0, 0], 0]
+            action = agent.predict(state, deterministic=True)
             next_state, reward, terminated, truncated, info = env.step(action[0])
             total_reward += reward
 
