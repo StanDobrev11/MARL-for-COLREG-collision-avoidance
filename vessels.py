@@ -77,8 +77,8 @@ class BaseShip:
 
         # Assign a name if not provided
         if name is None:
-            self.__name = f'{self.class_name}_{BaseShip.COUNT}_{self.kind}'
-            BaseShip.COUNT += 1  # Increment counter correctly
+            self.__name = f'{self.class_name}_{self.__class__.COUNT}_{self.kind}'
+            self.__class__.COUNT += 1  # Increment counter correctly
         else:
             self.__name = name
 
@@ -185,7 +185,7 @@ class Target(BaseShip):
         reversed_relative_bearing = self.calculate_relative_bearing(agent)
 
         # Head-on, Rule 14, each vessel sees the other ahead
-        if abs(self.relative_bearing) <= 5 and abs(reversed_relative_bearing) <= 5:
+        if abs(self.relative_bearing) <= 10 and abs(reversed_relative_bearing) <= 10:
             self.__aspect = 'head_on'
 
         # this sets for crossing or overtaking
