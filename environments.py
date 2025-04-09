@@ -6,7 +6,7 @@ import pygame
 
 from gymnasium import spaces
 from gymnasium.core import ObsType
-from gymnasium.spaces.utils import flatten_space, flatten
+from gymnasium.spaces.utils import flatten_space, flatten, unflatten
 
 import numpy as np
 
@@ -79,7 +79,7 @@ class MarineEnv(gym.Env):
         self.step_counter = 0
         self.training_stage = training_stage
         self.total_targets = total_targets
-        self.__total_targets = 3  # size of the targets in the observation space
+        self.__observed_targets = 3  # size of the targets in the observation space
         self.seed = self._set_global_seed(seed)
         self.traffic_condition = traffic_condition
         self.confined_water = confined_water
@@ -179,7 +179,7 @@ class MarineEnv(gym.Env):
                     'tbc': spaces.Box(low=-300, high=300, shape=(), dtype=np.float32),
                     'tcpa': spaces.Box(low=0, high=300, shape=(), dtype=np.float32),
                     'vessel_category': spaces.Discrete(len(BaseShip.VESSEL_CATEGORY)),  # vessel type index
-                }) for _ in range(3)  # 3 top dangerous targets
+                }) for _ in range(self.__observed_targets)  # 3 top dangerous targets
             ])
         })
 
@@ -668,13 +668,13 @@ class MarineEnv(gym.Env):
 
     def _generate_dangerous_targets_state(self):
         # initialize empty targets list with zero-filled entries
-        targets_data = self._generate_zero_target_data(self.__total_targets)  # match the observation space
+        targets_data = self._generate_zero_target_data(self.__observed_targets)  # match the observation space
 
         if self.own_ship.detected_targets:
             # Sort detected targets by dangerous coefficient (CPA ** 2 * TCPA) and take the top n
             sorted_targets = sorted(
                 self.own_ship.detected_targets, key=lambda x: x.cpa ** 2 * x.tcpa
-            )[:self.total_targets]
+            )[:self.__observed_targets]
 
             # Filter out resolved targets (those with tcpa <= 0)
             self.own_ship.dangerous_targets = [
@@ -686,6 +686,7 @@ class MarineEnv(gym.Env):
                 if target.cpa <= self.BASE_CPA_THRESHOLD and target.tcpa <= self.TCPA_THRESHOLD:
                     target.is_dangerous = True
                     targets_data[i] = self._generate_actual_target_data(target)
+
                 else:
                     target.is_dangerous = False  # Optionally mark non-dangerous explicitly
 
@@ -730,7 +731,12 @@ class MarineEnv(gym.Env):
         own_speed = self.own_ship.speed
 
         if aspect is None:
-            aspect = random.choice(list(BaseShip.ASPECT.keys()))
+            while True:
+                aspect = random.choice(list(BaseShip.ASPECT.keys()))
+                if aspect != 'not applicable':
+                    break
+        if aspect is None:
+            raise NotImplementedError
         # Target ship
         # if the relative course == 180 + relative bearing, the target is on a collision course.
         # to generate relative course != to 180 + relative bearing bss CPA, we need distance or TCPA
@@ -770,7 +776,6 @@ class MarineEnv(gym.Env):
 
         # deviation angle for randomness
         deviation_angle = np.degrees(np.arctan2(cpa, initial_distance))
-        # print('Scene: ', aspect)
 
         # calculating relative course in degrees and add deviation
         true_target_bearing = (own_course + relative_bearing) % 360
@@ -859,19 +864,25 @@ class MarineEnv(gym.Env):
         return result
 
     def _generate_observation_dict(self, observation: ObsType) -> dict[str, dict[str, Any]]:
-        idx = 0
-        own_ship_data = dict()
-        targets_data = dict()
-        for key in self.OWN_SHIP_PARAMS:
-            own_ship_data[key] = observation[idx]
-            idx += 1
-        for key in self.WP_PARAMS:
-            own_ship_data[key] = observation[idx]
-            idx += 1
-        for key in self.TARGET_PARAMS:
-            targets_data[key] = observation[idx]
-            idx += 1
-        return {'own_ship': own_ship_data, 'targets': targets_data}
+        # idx = 0
+        # own_ship_data = dict()
+        # targets_data = dict()
+        # for key in self.OWN_SHIP_PARAMS:
+        #     own_ship_data[key] = observation[idx]
+        #     idx += 1
+        # for key in self.WP_PARAMS:
+        #     own_ship_data[key] = observation[idx]
+        #     idx += 1
+        # for key in self.TARGET_PARAMS:
+        #     targets_data[key] = observation[idx]
+        #     idx += 1
+        # return {'own_ship': own_ship_data, 'targets': targets_data}
+        if observation is None:
+            raise TypeError('Observation cannot be None')
+        try:
+            return unflatten(self.raw_obs_space, observation)
+        except:
+            pass
 
 
 if __name__ == '__main__':
@@ -883,7 +894,7 @@ if __name__ == '__main__':
         training_stage=2,
         timescale=1 / 6,
         training=False,
-        # seed=42,
+        seed=2737650308,
         total_targets=5,
     )
     env = MarineEnv(**env_kwargs)
@@ -893,6 +904,10 @@ if __name__ == '__main__':
         verbose=0,
         device='cpu',
     )
+
+    # agent.learn(total_timesteps=int(1e5))
+    # agent.save('marl_logs/best')
+
     for i in range(1):
         state, _ = env.reset()
         print(env.training_stage)

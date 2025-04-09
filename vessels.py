@@ -37,7 +37,7 @@ class BaseShip:
         'crossing': 1,  # Rule 15
         'overtaking': 2,  # Rule 13
         'adrift': 3,  # underway but stopped and making no way
-        'not dangerous': 4, # when the situation is cleared
+        'not applicable': 4, # when the situation is cleared
     }
 
     VESSEL_CPA_MULTIPLIER = {
@@ -159,11 +159,11 @@ class Target(BaseShip):
         self.__cpa_threshold = base_cpa * traffic_multiplier * confined_multiplier * vessel_penalty
 
     @property
-    def aspect(self) -> int | None:
+    def aspect(self) -> int:
         try:
             return self.ASPECT.get(self.__aspect)
         except KeyError:
-            return None
+            return self.ASPECT.get('not applicable')
 
     @aspect.setter
     def aspect(self, agent: 'OwnShip') -> None:
@@ -195,12 +195,15 @@ class Target(BaseShip):
             if abs(reversed_relative_bearing) <= 112.5 and \
                     np.sign(self.relative_bearing) != np.sign(reversed_relative_bearing):
                 self.__aspect = 'crossing'
+
             # Overtaking, Rule 13, target sees the vessel abaft the beam
-            elif 112.5 < abs(reversed_relative_bearing) <= 180 and agent.speed > self.speed:
-                if np.sign(self.relative_bearing) != np.sign(course_diff):
+            elif 112.5 < abs(reversed_relative_bearing) <= 180 and agent.speed > self.speed and \
+                np.sign(self.relative_bearing) != np.sign(course_diff):
                     self.__aspect = 'overtaking'
-                else:
-                    self.__aspect = None
+            else:
+                self.__aspect = 'not applicable'
+        else:
+            self.__aspect = 'not applicable'
 
     @property
     def stand_on(self) -> bool:
@@ -253,7 +256,7 @@ class Target(BaseShip):
                 f'BCR: {self.bcr:.2f}\n'
                 f'TBC: {self.tbc:.2f}\n'
                 f'IsDangerous: {self.is_dangerous}\n'
-                f'Aspect: {self.aspect}\n'
+                f'Aspect: {self.__aspect}\n'
                 f'Category: {self.kind}\n'
                 f'Stand On: {self.stand_on}\n'
                 f'Visible: {self.visible}\n')
