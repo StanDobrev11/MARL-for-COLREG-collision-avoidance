@@ -198,8 +198,8 @@ class Target(BaseShip):
 
             # Overtaking, Rule 13, target sees the vessel abaft the beam
             elif 112.5 < abs(reversed_relative_bearing) <= 180 and agent.speed > self.speed and \
-                np.sign(self.relative_bearing) != np.sign(course_diff):
-                    self.__aspect = 'overtaking'
+                    np.sign(self.relative_bearing) != np.sign(course_diff):
+                self.__aspect = 'overtaking'
             else:
                 self.__aspect = 'not applicable'
         else:
