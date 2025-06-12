@@ -175,7 +175,7 @@ class MarineEnv(gym.Env):
                 }) for _ in range(3)  # 3 top dangerous targets
             ])
         })
-
+    # TODO transfer the method to the environments.py
     def _agent_step(self, observation, agent, action, waypoint: StaticObject = None):
         """ for each agent update parameters """
         # extract own ship params from the current state

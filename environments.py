@@ -910,6 +910,7 @@ if __name__ == '__main__':
 
     for i in range(1):
         state, _ = env.reset()
+        print(state)
         print(env.training_stage)
         print(env.own_ship.detected_targets)
         # env.cpa_limit = 2

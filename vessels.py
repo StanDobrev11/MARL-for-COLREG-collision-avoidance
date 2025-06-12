@@ -17,7 +17,10 @@ class StaticObject:
         return agent.calculate_distance(self)
 
     def wp_eta(self, agent: 'OwnShip') -> float:
-        # will be recalculated when calling reset()
+        """
+        This method calculates eta basis own ship data
+        The eta will be recalculated when calling reset()
+        """
         return 60 * self.wp_distance(agent) / agent.speed
 
     def wp_relative_bearing(self, agent: 'OwnShip') -> float:
