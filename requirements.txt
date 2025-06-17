@@ -8,3 +8,11 @@ pygame
 optuna
 numpy
 rich
+django==5.0.4
+djangorestframework
+celery
+redis
+pynmea2
+pyserial
+channels
+python-dotenv
